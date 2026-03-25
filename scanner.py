@@ -9,18 +9,52 @@ from datetime import datetime
 # MODELO
 # ==============================
 
+def get_team_data(team):
+
+    db = {
+        "Barcelona": {"xg": 2.2, "xga": 1.0, "form": 0.75},
+        "Real Madrid": {"xg": 2.1, "xga": 1.0, "form": 0.74},
+        "Manchester City": {"xg": 2.4, "xga": 0.9, "form": 0.78},
+        "Arsenal": {"xg": 2.0, "xga": 1.1, "form": 0.72},
+        "CRB": {"xg": 1.1, "xga": 1.3, "form": 0.48},
+        "Sport": {"xg": 1.2, "xga": 1.4, "form": 0.50},
+        "Sparta Prague": {"xg": 1.7, "xga": 1.2, "form": 0.60},
+        "Hammarby IF": {"xg": 1.6, "xga": 1.3, "form": 0.58}
+    }
+
+    return db.get(team, {"xg": 1.3, "xga": 1.3, "form": 0.5})
+
+
 def calculate_score(home, away):
 
-    strength = (len(home) - len(away)) / 20  # placeholder simples
+    h = get_team_data(home)
+    a = get_team_data(away)
 
-    prob = 50 + (math.tanh(strength) * 45)
+    raw_strength = (
+        (h["xg"] - a["xga"]) +
+        (h["form"] - a["form"]) * 0.9
+    )
+
+    strength = math.tanh(raw_strength)
+
+    prob = 50 + (strength * 45)
+    prob += (h["form"] - 0.5) * 6
 
     return round(max(5, min(95, prob)), 2)
 
 
+# ==============================
+# EV
+# ==============================
+
 def expected_value(prob, odd):
+
     return round((prob / 100) - (1 / odd), 3)
 
+
+# ==============================
+# CLASSIFICAÇÃO
+# ==============================
 
 def classify(prob, ev):
 
@@ -35,40 +69,75 @@ def classify(prob, ev):
 
 
 # ==============================
-# COLETA ESPN (REAL)
+# PICK (CORRIGIDO)
+# ==============================
+
+def get_pick(prob, ev):
+
+    if ev <= 0:
+        return "❌ NO BET"
+
+    if 48 <= prob <= 52:
+        return "❌ NO BET"
+
+    if prob > 52:
+        return "🏠 HOME"
+
+    if prob < 48:
+        return "✈️ AWAY"
+
+    return "❌ NO BET"
+
+
+# ==============================
+# FILTRO
+# ==============================
+
+def is_valid_game(home, away):
+
+    banned = ["U12", "U13", "U14", "U15"]
+
+    for b in banned:
+        if b in home or b in away:
+            return False
+
+    return True
+
+
+# ==============================
+# COLETA ESPN
 # ==============================
 
 def get_matches_espn():
 
     url = "https://www.espn.com/soccer/fixtures"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    response = requests.get(url, headers=headers)
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-    soup = BeautifulSoup(response.text, "html.parser")
+        matches = []
 
-    matches = []
+        for row in soup.find_all("tr"):
+            teams = row.find_all("span")
 
-    # ESPN muda estrutura com frequência — por isso buscamos genericamente
-    for match in soup.find_all("tr"):
+            if len(teams) >= 2:
+                home = teams[0].text.strip()
+                away = teams[1].text.strip()
 
-        teams = match.find_all("span")
+                if home and away:
+                    matches.append((home, away, 1.90))
 
-        if len(teams) >= 2:
-            home = teams[0].text.strip()
-            away = teams[1].text.strip()
+        return matches[:20]
 
-            if home and away:
-                matches.append((home, away, 1.9))
-
-    return matches[:20]
+    except:
+        return []
 
 
 # ==============================
-# BACKUP (GENÉRICO)
+# FALLBACK
 # ==============================
 
 def get_matches_fallback():
@@ -85,44 +154,53 @@ def get_matches_fallback():
 # APP
 # ==============================
 
-st.title("📊 Scanner com Jogos Reais")
+st.title("📊 Scanner Profissional Completo")
 
-date = st.date_input("📅 Data da análise", datetime.today())
+date = st.date_input("📅 Data do Backtest", datetime.today())
 
-if st.button("Buscar jogos e analisar"):
+if st.button("Rodar Análise"):
 
-    # 🔥 tenta ESPN
     matches = get_matches_espn()
 
-    # fallback se falhar
     if not matches:
-        st.warning("⚠️ ESPN bloqueado — usando fallback")
+        st.warning("ESPN falhou — usando fallback")
         matches = get_matches_fallback()
 
     results = []
 
     for home, away, odd in matches:
 
+        if not is_valid_game(home, away):
+            continue
+
         prob = calculate_score(home, away)
         ev = expected_value(prob, odd)
         risk = classify(prob, ev)
+        pick = get_pick(prob, ev)
 
         results.append({
             "Jogo": f"{home} vs {away}",
             "Probabilidade": prob,
             "Odd": odd,
             "EV": ev,
-            "Classificação": risk
+            "Classificação": risk,
+            "Pick": pick
         })
 
-    df = pd.DataFrame(results)
+    if results:
 
-    st.dataframe(df)
+        df = pd.DataFrame(results)
 
-    # métricas
-    st.subheader("📈 Resumo")
+        st.dataframe(df)
 
-    st.write("Total jogos:", len(df))
-    st.write("ELITE:", len(df[df["Classificação"] == "🔥 ELITE"]))
-    st.write("VALOR:", len(df[df["Classificação"] == "🟢 VALOR FORTE"]))
-    st.write("EV médio:", round(df["EV"].mean(), 3))
+        # métricas
+        st.subheader("📈 Resumo")
+
+        st.write("Total jogos:", len(df))
+        st.write("ELITE:", len(df[df["Classificação"] == "🔥 ELITE"]))
+        st.write("VALOR:", len(df[df["Classificação"] == "🟢 VALOR FORTE"]))
+        st.write("NO BET:", len(df[df["Pick"] == "❌ NO BET"]))
+        st.write("EV médio:", round(df["EV"].mean(), 3))
+
+    else:
+        st.warning("Nenhum jogo encontrado.")
