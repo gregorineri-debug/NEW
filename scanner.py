@@ -1,15 +1,10 @@
 import requests
 import pandas as pd
-from bs4 import BeautifulSoup
-
-# ==============================
-# CONFIG
-# ==============================
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ==============================
-# SCRAPER (ROBUSTO)
+# SCRAPER ROBUSTO
 # ==============================
 
 def get_fbref_table():
@@ -27,7 +22,15 @@ def get_fbref_table():
 
         print(f"Tabelas encontradas: {len(tables)}")
 
-        # pega a maior tabela (geralmente a correta)
+        # tenta achar tabela com "Squad" ou "Team"
+        for i, t in enumerate(tables):
+
+            for col in t.columns:
+                if "Squad" in str(col) or "Team" in str(col):
+                    print(f"Usando tabela {i}")
+                    return t
+
+        # fallback: maior tabela
         df = max(tables, key=lambda x: x.shape[1])
 
         return df
@@ -36,36 +39,44 @@ def get_fbref_table():
         print("Erro no scraping:", e)
         return None
 
+
 # ==============================
 # DADOS DO TIME
 # ==============================
 
 def get_team_data(team, df):
 
+    # fallback padrão (NUNCA quebra)
+    fallback = {"xg": 1.3, "xga": 1.3, "form": 0.5}
+
     if df is None:
-        return {"xg": 1.3, "xga": 1.3, "form": 0.5}
+        return fallback
 
     try:
         row = df[df.iloc[:, 0].astype(str).str.contains(team, na=False)]
 
         if row.empty:
             print(f"Time não encontrado: {team}")
-            return {"xg": 1.3, "xga": 1.3, "form": 0.5}
+            return fallback
 
         row = row.iloc[0]
 
-        def get_col_value(possible_names):
-            for col in df.columns:
-                for name in possible_names:
-                    if name.lower() in str(col).lower():
-                        try:
-                            return float(row[col])
-                        except:
-                            return 1.3
-            return 1.3
+        xg = 1.3
+        xga = 1.3
 
-        xg = get_col_value(["xg"])
-        xga = get_col_value(["xga", "xg against"])
+        for col in df.columns:
+            col_str = str(col).lower()
+
+            try:
+                val = float(row[col])
+            except:
+                continue
+
+            if "xg" in col_str and "against" not in col_str:
+                xg = val
+
+            if "against" in col_str and "xg" in col_str:
+                xga = val
 
         form = (xg - xga) / 2 + 0.5
 
@@ -76,11 +87,12 @@ def get_team_data(team, df):
         }
 
     except Exception as e:
-        print("Erro ao extrair time:", e)
-        return {"xg": 1.3, "xga": 1.3, "form": 0.5}
+        print("Erro no time:", e)
+        return fallback
+
 
 # ==============================
-# MODELO (AJUSTADO)
+# MODELO CALIBRADO
 # ==============================
 
 def calculate_score(home, away, df):
@@ -89,26 +101,28 @@ def calculate_score(home, away, df):
     away_data = get_team_data(away, df)
 
     strength = (
-        (home_data["xg"] - away_data["xga"]) * 1.8 +
-        (home_data["form"] - away_data["form"]) * 1.2
+        (home_data["xg"] - away_data["xga"]) * 2.2 +
+        (home_data["form"] - away_data["form"]) * 1.5
     )
 
-    prob = 50 + (strength * 25)
+    prob = 50 + (strength * 22)
 
-    # dispersão (corrige 53% travado)
+    # dispersão (corrige travamento em 53%)
     if prob > 65:
-        prob += 4
+        prob += 5
     elif prob < 45:
-        prob -= 4
+        prob -= 5
 
     return round(max(1, min(99, prob)), 2)
 
+
 # ==============================
-# EV
+# EXPECTED VALUE
 # ==============================
 
 def expected_value(prob, odd):
     return round((prob / 100 * odd) - 1, 3)
+
 
 # ==============================
 # CLASSIFICAÇÃO
@@ -125,19 +139,22 @@ def classify(prob, ev):
     else:
         return "🔴 EVITAR"
 
+
 # ==============================
-# JOGOS DE TESTE
+# JOGOS
 # ==============================
 
 def get_matches():
+
     return [
-        {"home": "Manchester City", "away": "Arsenal", "odd": 1.85},
-        {"home": "Barcelona", "away": "Real Madrid", "odd": 1.90},
-        {"home": "CRB", "away": "Sport", "odd": 2.10}
+        ("Manchester City", "Arsenal", 1.85),
+        ("Barcelona", "Real Madrid", 1.90),
+        ("CRB", "Sport", 2.10)
     ]
 
+
 # ==============================
-# EXECUÇÃO
+# EXECUÇÃO PRINCIPAL
 # ==============================
 
 def run():
@@ -145,29 +162,22 @@ def run():
     df = get_fbref_table()
 
     if df is None:
-        print("Falha ao carregar dados")
-        return
+        print("\n⚠️ Usando fallback (sem scraping)\n")
 
-    results = []
+    matches = get_matches()
 
-    for m in get_matches():
+    for home, away, odd in matches:
 
-        prob = calculate_score(m["home"], m["away"], df)
-        ev = expected_value(prob, m["odd"])
+        prob = calculate_score(home, away, df)
+        ev = expected_value(prob, odd)
         risk = classify(prob, ev)
 
-        results.append({
-            "Jogo": f"{m['home']} vs {m['away']}",
-            "Probabilidade": prob,
-            "Odd": m["odd"],
-            "EV": ev,
-            "Classificação": risk
-        })
-
-    df_result = pd.DataFrame(results)
-
-    print("\nRESULTADO FINAL:\n")
-    print(df_result)
+        print(f"\n{home} vs {away}")
+        print(f"Probabilidade: {prob}%")
+        print(f"Odd: {odd}")
+        print(f"EV: {ev}")
+        print(f"Classificação: {risk}")
+        print("-" * 40)
 
 
 # ==============================
@@ -178,14 +188,10 @@ def backtest():
 
     df = get_fbref_table()
 
-    if df is None:
-        return
-
-    # histórico simulado (trocar por jogos reais depois)
     matches = [
-        ("Manchester City", "Arsenal", 1.8, 1),
-        ("Barcelona", "Real Madrid", 1.9, 0),
-        ("CRB", "Sport", 2.1, 0)
+        ("Manchester City", "Arsenal", 1.85, 1),
+        ("Barcelona", "Real Madrid", 1.90, 0),
+        ("CRB", "Sport", 2.10, 0)
     ]
 
     results = []
@@ -202,10 +208,10 @@ def backtest():
             "Acertou": pred == real
         })
 
-    df_backtest = pd.DataFrame(results)
-
     print("\nBACKTEST:\n")
-    print(df_backtest)
+
+    for r in results:
+        print(r)
 
 
 # ==============================
@@ -216,6 +222,6 @@ if __name__ == "__main__":
 
     run()
 
-    print("\n--- BACKTEST ---\n")
+    print("\n=================\n")
 
     backtest()
