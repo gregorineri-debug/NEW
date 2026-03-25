@@ -2,8 +2,4 @@ streamlit
 pandas
 numpy
 requests
-beautifulsoup4
-lxml
-selenium
-webdriver-manager
-pytz
+matplotlib
