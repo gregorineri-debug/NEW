@@ -1,145 +1,109 @@
-import requests
-import pandas as pd
 import streamlit as st
-from datetime import datetime
-import statistics
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Scanner V4.9 PRO", layout="wide")
+st.set_page_config(page_title="Backtest Greg Stats X", layout="wide")
 
-st.title("🌍 Scanner Automático V4.9 PRO (MODO LUCRO)")
+st.title("📊 Backtest - Greg Stats X (V4.5)")
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# =========================
+# 📥 Upload de dados
+# =========================
+st.sidebar.header("📂 Upload da Base Histórica")
+uploaded_file = st.sidebar.file_uploader("Envie seu CSV", type=["csv"])
 
-@st.cache_data(ttl=600)
-def get_matches():
-    url = "https://api.sofascore.com/api/v1/sport/football/scheduled-events/" + datetime.today().strftime("%Y-%m-%d")
-    data = requests.get(url, headers=HEADERS).json()
-    matches = []
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
 
-    for event in data.get("events", []):
-        matches.append({
-            "home_id": event["homeTeam"]["id"],
-            "away_id": event["awayTeam"]["id"],
-            "home": event["homeTeam"]["name"],
-            "away": event["awayTeam"]["name"],
-            "tournament": event["tournament"]["name"],
-            "country": event["tournament"]["category"]["name"]
-        })
+    # =========================
+    # 🔎 Ajuste dos dados
+    # =========================
+    # Esperado no CSV:
+    # Date, League, Market, Score, Odd, Result (1/0)
 
-    return matches
+    df["Profit"] = np.where(df["Result"] == 1, df["Odd"] - 1, -1)
 
-@st.cache_data(ttl=600)
-def get_last_matches(team_id):
-    url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/10"
-    try:
-        data = requests.get(url, headers=HEADERS).json()
-        events = data.get("events", [])
+    # =========================
+    # 🎛️ Filtros
+    # =========================
+    st.sidebar.header("🎯 Filtros")
 
-        wins = 0
-        goals_scored = []
-        goals_conceded = []
-        home_wins = 0
-        away_wins = 0
-        home_games = 0
-        away_games = 0
+    min_score = st.sidebar.slider("Score mínimo", 0, 100, 70)
+    selected_leagues = st.sidebar.multiselect(
+        "Selecione as ligas",
+        options=df["League"].unique(),
+        default=df["League"].unique()
+    )
+    selected_markets = st.sidebar.multiselect(
+        "Selecione os mercados",
+        options=df["Market"].unique(),
+        default=df["Market"].unique()
+    )
 
-        for e in events:
-            is_home = e["homeTeam"]["id"] == team_id
-            hs = e["homeScore"]["current"]
-            as_ = e["awayScore"]["current"]
+    # Aplicando filtros
+    filtered_df = df[
+        (df["Score"] >= min_score) &
+        (df["League"].isin(selected_leagues)) &
+        (df["Market"].isin(selected_markets))
+    ].copy()
 
-            if is_home:
-                home_games += 1
-                goals_scored.append(hs)
-                goals_conceded.append(as_)
-                if hs > as_:
-                    wins += 1
-                    home_wins += 1
-            else:
-                away_games += 1
-                goals_scored.append(as_)
-                goals_conceded.append(hs)
-                if as_ > hs:
-                    wins += 1
-                    away_wins += 1
+    st.subheader("📋 Dados Filtrados")
+    st.dataframe(filtered_df)
 
-        win_rate = wins / max(1, len(events))
-        avg_scored = sum(goals_scored) / max(1, len(goals_scored))
-        avg_conceded = sum(goals_conceded) / max(1, len(goals_conceded))
-        home_win_rate = home_wins / max(1, home_games)
-        away_win_rate = away_wins / max(1, away_games)
+    # =========================
+    # 📊 Métricas
+    # =========================
+    total_bets = len(filtered_df)
+    total_profit = filtered_df["Profit"].sum()
+    total_stake = total_bets  # stake fixa = 1 unidade
 
-        consistency = 1 / (1 + (statistics.pvariance(goals_scored) + statistics.pvariance(goals_conceded)))
+    roi = (total_profit / total_stake) * 100 if total_stake > 0 else 0
+    winrate = (filtered_df["Result"].sum() / total_bets) * 100 if total_bets > 0 else 0
 
-        return {
-            "win_rate": win_rate,
-            "avg_scored": avg_scored,
-            "avg_conceded": avg_conceded,
-            "home_win_rate": home_win_rate,
-            "away_win_rate": away_win_rate,
-            "consistency": consistency
-        }
+    st.subheader("📈 Resultados do Backtest")
 
-    except:
-        return {
-            "win_rate": 0.5,
-            "avg_scored": 1,
-            "avg_conceded": 1,
-            "home_win_rate": 0.5,
-            "away_win_rate": 0.5,
-            "consistency": 0.5
-        }
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Lucro Total", f"{total_profit:.2f}")
+    col2.metric("ROI (%)", f"{roi:.2f}%")
+    col3.metric("Winrate (%)", f"{winrate:.2f}%")
 
-def calculate_score(home, away):
-    forma = home["win_rate"] - away["win_rate"]
-    ataque = home["avg_scored"] - away["avg_scored"]
-    defesa = away["avg_conceded"] - home["avg_conceded"]
-    casa_fora = home["home_win_rate"] - away["away_win_rate"]
-    consistencia = home["consistency"] - away["consistency"]
+    # =========================
+    # 📉 Curva de banca
+    # =========================
+    filtered_df = filtered_df.reset_index(drop=True)
+    filtered_df["Equity"] = filtered_df["Profit"].cumsum()
 
-    score = (forma * 30 + ataque * 20 + defesa * 20 + casa_fora * 20 + consistencia * 10)
-    score = max(0, min(100, 50 + score))
-    return score
+    st.subheader("📉 Curva de Banca")
 
-def score_to_probability(score):
-    return round(score / 100, 2)
+    fig, ax = plt.subplots()
+    ax.plot(filtered_df["Equity"])
+    ax.set_title("Evolução da Banca")
+    ax.set_xlabel("Jogos")
+    ax.set_ylabel("Lucro Acumulado")
 
-def calculate_ev(prob, odd):
-    return round((prob * odd) - 1, 3)
+    st.pyplot(fig)
 
-#⚠️ TROCAR AQUI DEPOIS POR API REAL
-def get_real_odds():
-    return 1.80
+    # =========================
+    # 🔍 Análise por Score
+    # =========================
+    st.subheader("🔎 Performance por Score")
 
-matches = get_matches()
-results = []
+    bins = [0, 60, 70, 80, 90, 100]
+    labels = ["<60", "60-69", "70-79", "80-89", "90+"]
 
-for m in matches:
-    home = get_last_matches(m["home_id"])
-    away = get_last_matches(m["away_id"])
+    filtered_df["Score_Range"] = pd.cut(filtered_df["Score"], bins=bins, labels=labels)
 
-    score = calculate_score(home, away)
-    prob = score_to_probability(score)
-    odd = get_real_odds()
-    ev = calculate_ev(prob, odd)
+    score_analysis = filtered_df.groupby("Score_Range").agg(
+        Bets=("Result", "count"),
+        Wins=("Result", "sum"),
+        Profit=("Profit", "sum")
+    )
 
-    results.append({
-        "Jogo": f"{m['home']} x {m['away']}",
-        "Liga": m["tournament"],
-        "Score": round(score, 1),
-        "Prob": prob,
-        "Odd": odd,
-        "EV": ev
-    })
+    score_analysis["Winrate (%)"] = (score_analysis["Wins"] / score_analysis["Bets"]) * 100
+    score_analysis["ROI (%)"] = (score_analysis["Profit"] / score_analysis["Bets"]) * 100
 
-if results:
-    df = pd.DataFrame(results)
-
-    st.subheader("📊 Todos os Jogos")
-    st.dataframe(df, use_container_width=True)
-
-    st.subheader("💰 Apostas com Valor (EV > 0)")
-    st.dataframe(df[df["EV"] > 0], use_container_width=True)
+    st.dataframe(score_analysis)
 
 else:
-    st.warning("Nenhum jogo encontrado.")
+    st.info("⬆️ Faça upload de um CSV para iniciar o backtest.")
