@@ -1,152 +1,130 @@
-import streamlit as st
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import math
+import pandas as pd
 from datetime import datetime
 
 # ==============================
-# MODELO SIMPLIFICADO (ESTÁVEL)
+# HEADERS (IMPORTANTE)
 # ==============================
 
-def get_team_strength(team):
-
-    team = team.lower()
-
-    strong = ["real madrid", "barcelona", "bayern munich", "manchester city"]
-    medium = ["arsenal", "manchester united", "chelsea"]
-
-    if team in strong:
-        return {"xg": 2.2, "xga": 1.0, "form": 0.75}
-
-    elif team in medium:
-        return {"xg": 1.9, "xga": 1.1, "form": 0.65}
-
-    else:
-        return {"xg": 1.4, "xga": 1.4, "form": 0.50}
-
-
-def calculate_score(home, away):
-
-    h = get_team_strength(home)
-    a = get_team_strength(away)
-
-    raw = (
-        (h["xg"] - a["xga"]) +
-        (h["form"] - a["form"]) * 0.9
-    )
-
-    strength = math.tanh(raw)
-
-    prob = 50 + (strength * 45)
-    prob += (h["form"] - 0.5) * 5
-
-    return round(max(5, min(95, prob)), 2)
-
+headers = {
+    "User-Agent": "Mozilla/5.0"
+}
 
 # ==============================
-# EV
-# ==============================
-
-def expected_value(prob, odd):
-
-    return round((prob / 100) - (1 / odd), 3)
-
-
-# ==============================
-# PICK
-# ==============================
-
-def get_pick(prob, ev):
-
-    if ev <= 0:
-        return "❌ NO BET"
-
-    if prob >= 55:
-        return "🏠 HOME"
-
-    if prob <= 45:
-        return "✈️ AWAY"
-
-    return "❌ NO BET"
-
-
-# ==============================
-# COLETA DE JOGOS (ESPN)
+# PEGAR JOGOS DO DIA (ESPN)
 # ==============================
 
 def get_matches():
 
     url = "https://www.espn.com/soccer/fixtures"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    r = requests.get(url, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    matches = []
+
+    for row in soup.find_all("tr"):
+
+        teams = row.find_all("span")
+
+        if len(teams) >= 2:
+
+            home = teams[0].text.strip()
+            away = teams[1].text.strip()
+
+            if home and away:
+                matches.append((home, away))
+
+    return matches
+
+
+# ==============================
+# PEGAR ESTATÍSTICAS (FBREF)
+# ==============================
+
+def get_fbref_stats(team_name):
+
+    # URL genérica (não perfeita, mas base)
+    url = "https://fbref.com/en/stathead/team_matchlogs"
 
     try:
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        matches = []
+        # fallback simplificado (porque FBref é complexo)
+        stats = {
+            "xg": 1.5,
+            "xga": 1.5,
+            "possession": 50,
+            "shots": 10
+        }
 
-        for row in soup.find_all("tr"):
-
-            teams = row.find_all("span")
-
-            if len(teams) >= 2:
-
-                home = teams[0].text.strip()
-                away = teams[1].text.strip()
-
-                if home and away:
-                    matches.append((home, away, 1.90))
-
-        if matches:
-            return matches[:20]
+        return stats
 
     except:
-        pass
 
-    # fallback
-    return [
-        ("Real Madrid", "Barcelona", 1.90),
-        ("Manchester City", "Arsenal", 1.85),
-        ("CRB", "Sport", 2.10),
-        ("Sparta Prague", "Hammarby IF", 1.95),
-    ]
+        return {
+            "xg": 1.3,
+            "xga": 1.3,
+            "possession": 50,
+            "shots": 9
+        }
 
 
 # ==============================
-# APP
+# MONTAR DATASET
 # ==============================
 
-st.title("📊 Scanner Profissional (Versão Estável)")
-
-date = st.date_input("📅 Data da análise", datetime.today())
-
-if st.button("Rodar Análise"):
+def build_dataset():
 
     matches = get_matches()
 
-    results = []
+    data = []
 
-    for home, away, odd in matches:
+    for home, away in matches:
 
-        prob = calculate_score(home, away)
-        ev = expected_value(prob, odd)
-        pick = get_pick(prob, ev)
+        home_stats = get_fbref_stats(home)
+        away_stats = get_fbref_stats(away)
 
-        results.append({
-            "Jogo": f"{home} vs {away}",
-            "Probabilidade": prob,
-            "Odd": odd,
-            "EV": ev,
-            "Pick": pick
+        data.append({
+            "home_team": home,
+            "away_team": away,
+
+            "home_xg": home_stats["xg"],
+            "home_xga": home_stats["xga"],
+            "home_possession": home_stats["possession"],
+
+            "away_xg": away_stats["xg"],
+            "away_xga": away_stats["xga"],
+            "away_possession": away_stats["possession"],
         })
 
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(data)
 
-    st.dataframe(df)
+    return df
 
-    st.subheader("📈 Resumo")
 
-    st.write("Total jogos:", len(df))
-    st.write("Picks válidas:", len(df[df["Pick"] != "❌ NO BET"]))
-    st.write("EV médio:", round(df["EV"].mean(), 3))
+# ==============================
+# EXPORTAR CSV
+# ==============================
+
+def export_csv(df):
+
+    filename = f"football_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    df.to_csv(filename, index=False)
+
+    print(f"Arquivo salvo: {filename}")
+
+
+# ==============================
+# EXECUÇÃO
+# ==============================
+
+if __name__ == "__main__":
+
+    df = build_dataset()
+
+    print(df.head())
+
+    export_csv(df)
