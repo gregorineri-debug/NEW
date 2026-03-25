@@ -1,75 +1,59 @@
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
 
-# ==============================
-# HEADERS (IMPORTANTE)
-# ==============================
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-headers = {
-    "User-Agent": "Mozilla/5.0"
-}
 
 # ==============================
-# PEGAR JOGOS DO DIA (ESPN)
+# BUSCAR JOGOS (API SIMPLES)
 # ==============================
 
 def get_matches():
 
-    url = "https://www.espn.com/soccer/fixtures"
-    
-    r = requests.get(url, headers=headers, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
+    url = "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=2024-01-01&s=Soccer"
 
-    matches = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        data = res.json()
 
-    for row in soup.find_all("tr"):
+        matches = []
 
-        teams = row.find_all("span")
+        for m in data.get("events", []):
 
-        if len(teams) >= 2:
-
-            home = teams[0].text.strip()
-            away = teams[1].text.strip()
+            home = m.get("strHomeTeam")
+            away = m.get("strAwayTeam")
 
             if home and away:
                 matches.append((home, away))
 
-    return matches
-
-
-# ==============================
-# PEGAR ESTATÍSTICAS (FBREF)
-# ==============================
-
-def get_fbref_stats(team_name):
-
-    # URL genérica (não perfeita, mas base)
-    url = "https://fbref.com/en/stathead/team_matchlogs"
-
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        # fallback simplificado (porque FBref é complexo)
-        stats = {
-            "xg": 1.5,
-            "xga": 1.5,
-            "possession": 50,
-            "shots": 10
-        }
-
-        return stats
+        return matches
 
     except:
+        return []
 
-        return {
-            "xg": 1.3,
-            "xga": 1.3,
-            "possession": 50,
-            "shots": 9
-        }
+
+# ==============================
+# DADOS SIMPLIFICADOS POR TIME
+# ==============================
+
+def get_team_data(team):
+
+    # simulação controlada (evita falha total)
+    base_strength = {
+        "Real Madrid": 2.2,
+        "Barcelona": 2.1,
+        "Manchester City": 2.3,
+        "Arsenal": 1.9
+    }
+
+    strength = base_strength.get(team, 1.3)
+
+    return {
+        "xg": strength,
+        "xga": 1.5,
+        "form": strength / 3
+    }
 
 
 # ==============================
@@ -80,51 +64,53 @@ def build_dataset():
 
     matches = get_matches()
 
-    data = []
+    if not matches:
+        print("Nenhum jogo encontrado")
+        return pd.DataFrame()
+
+    rows = []
 
     for home, away in matches:
 
-        home_stats = get_fbref_stats(home)
-        away_stats = get_fbref_stats(away)
+        h = get_team_data(home)
+        a = get_team_data(away)
 
-        data.append({
-            "home_team": home,
-            "away_team": away,
+        rows.append({
+            "home": home,
+            "away": away,
 
-            "home_xg": home_stats["xg"],
-            "home_xga": home_stats["xga"],
-            "home_possession": home_stats["possession"],
+            "home_xg": h["xg"],
+            "away_xg": a["xg"],
 
-            "away_xg": away_stats["xg"],
-            "away_xga": away_stats["xga"],
-            "away_possession": away_stats["possession"],
+            "home_form": h["form"],
+            "away_form": a["form"],
         })
 
-    df = pd.DataFrame(data)
-
-    return df
+    return pd.DataFrame(rows)
 
 
 # ==============================
-# EXPORTAR CSV
+# EXPORTAR
 # ==============================
 
-def export_csv(df):
+def save_csv(df):
 
-    filename = f"football_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    if df.empty:
+        print("DataFrame vazio")
+        return
+
+    filename = f"matches_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     df.to_csv(filename, index=False)
 
-    print(f"Arquivo salvo: {filename}")
+    print(f"CSV salvo: {filename}")
 
 
 # ==============================
 # EXECUÇÃO
 # ==============================
 
-if __name__ == "__main__":
+df = build_dataset()
 
-    df = build_dataset()
+print(df)
 
-    print(df.head())
-
-    export_csv(df)
+save_csv(df)
