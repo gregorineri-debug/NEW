@@ -4,7 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ==============================
-# MODELO
+# MODELO DE TIMES
 # ==============================
 
 def get_team_data(team):
@@ -21,24 +21,40 @@ def get_team_data(team):
     return db.get(team, {"xg": 1.3, "xga": 1.3, "form": 0.5})
 
 
+# ==============================
+# MODELO AJUSTADO
+# ==============================
+
 def calculate_score(home, away):
 
     h = get_team_data(home)
     a = get_team_data(away)
 
     strength = (
-        (h["xg"] - a["xga"]) * 1.8 +
-        (h["form"] - a["form"]) * 1.2
+        (h["xg"] - a["xga"]) * 2.5 +
+        (h["form"] - a["form"]) * 2.0
     )
 
-    prob = 50 + strength * 18
+    prob = 50 + strength * 25
 
-    return round(max(1, min(99, prob)), 2)
+    return round(max(5, min(95, prob)), 2)
 
+
+# ==============================
+# EV REAL (EDGE)
+# ==============================
 
 def expected_value(prob, odd):
-    return round((prob / 100 * odd) - 1, 3)
 
+    implied = 1 / odd
+    edge = (prob / 100) - implied
+
+    return round(edge, 3)
+
+
+# ==============================
+# CLASSIFICAÇÃO
+# ==============================
 
 def classify(prob, ev):
 
@@ -53,7 +69,22 @@ def classify(prob, ev):
 
 
 # ==============================
-# SOFASCORE (PRIMEIRO)
+# FILTRO DE JOGOS FRACOS
+# ==============================
+
+def is_valid_game(home, away):
+
+    banned = ["U12", "U13", "U14", "U15", "U16", "U17", "U18"]
+
+    for b in banned:
+        if b in home or b in away:
+            return False
+
+    return True
+
+
+# ==============================
+# COLETA SOFASCORE
 # ==============================
 
 def get_matches_sofascore():
@@ -66,12 +97,14 @@ def get_matches_sofascore():
         res = requests.get(url, timeout=10)
         data = res.json()
 
-        for event in data.get("events", []):
+        for e in data.get("events", []):
 
-            home = event["homeTeam"]["name"]
-            away = event["awayTeam"]["name"]
+            home = e["homeTeam"]["name"]
+            away = e["awayTeam"]["name"]
 
-            matches.append((home, away, 1.90))
+            if is_valid_game(home, away):
+
+                matches.append((home, away, 1.90))
 
     except:
         pass
@@ -80,7 +113,7 @@ def get_matches_sofascore():
 
 
 # ==============================
-# ESPN (SEGUNDO)
+# COLETA ESPN
 # ==============================
 
 def get_matches_espn():
@@ -106,7 +139,8 @@ def get_matches_espn():
                 home = teams[0].text.strip()
                 away = teams[1].text.strip()
 
-                if home and away and home != away:
+                if is_valid_game(home, away):
+
                     matches.append((home, away, 1.90))
 
     except:
@@ -121,14 +155,11 @@ def get_matches_espn():
 
 def get_matches():
 
-    # 1º tenta Sofascore
     matches = get_matches_sofascore()
 
-    # 2º tenta ESPN
     if not matches:
         matches = get_matches_espn()
 
-    # 3º fallback garantido
     if not matches:
         matches = [
             ("Barcelona", "Real Madrid", 1.90),
@@ -143,7 +174,7 @@ def get_matches():
 # APP
 # ==============================
 
-st.title("📊 Scanner Profissional (Sofascore → ESPN)")
+st.title("📊 Scanner Profissional Ajustado")
 
 if st.button("Rodar Análise"):
 
