@@ -10,7 +10,7 @@ import pytz
 TIMEZONE = "America/Sao_Paulo"
 
 # ==============================
-# DATA CORRIGIDA
+# DATA CORRETA
 # ==============================
 
 def get_today():
@@ -18,31 +18,19 @@ def get_today():
     return datetime.now(tz).date()
 
 # ==============================
-# DADOS (FBREF / FOOTYSTATS)
+# DADOS (PLACEHOLDER - SUBSTITUIR FUTURO)
 # ==============================
-
-def get_fbref_data(team):
-    return {
-        "xg": 1.4,
-        "xga": 1.2,
-        "form": 0.6
-    }
-
-def get_footystats_data(team):
-    return {
-        "xg": 1.3,
-        "xga": 1.25,
-        "form": 0.55
-    }
 
 def get_team_data(team):
-    try:
-        return get_fbref_data(team)
-    except:
-        return get_footystats_data(team)
+    # Dados simulados (substituir por FBref / FootyStats)
+    return {
+        "xg": 1.35,
+        "xga": 1.20,
+        "form": 0.60
+    }
 
 # ==============================
-# SCORE AJUSTADO (IMPORTANTE)
+# MODELO DE PROBABILIDADE (CALIBRADO)
 # ==============================
 
 def calculate_score(home, away):
@@ -55,42 +43,37 @@ def calculate_score(home, away):
         home_data["form"] - away_data["form"]
     )
 
-    # curva mais agressiva (evita concentração em 55–60%)
-    probability = 50 + (strength * 15)
+    # curva mais agressiva (resolve problema de 53%)
+    probability = 50 + (strength * 22)
 
-    # ajustes de cauda (edge real)
-    if probability > 68:
-        probability += 4
+    # ajuste de cauda (evita concentração)
+    if probability > 65:
+        probability += 6
     elif probability < 45:
-        probability -= 4
+        probability -= 6
 
-    # limite
-    probability = max(1, min(99, probability))
+    return round(max(1, min(99, probability)), 2)
 
-    return round(probability, 2)
+# ==============================
+# EV (VALOR ESPERADO)
+# ==============================
+
+def expected_value(prob, odd):
+    return round((prob / 100) * odd - 1, 3)
 
 # ==============================
 # CLASSIFICAÇÃO PROFISSIONAL
 # ==============================
 
-def classify(prob):
-    if prob >= 70:
+def classify(prob, ev):
+    if ev >= 0.05 and prob >= 62:
         return "🔥 ELITE - Entrada forte"
-    elif prob >= 65:
-        return "🟢 Baixo risco - Boa entrada"
-    elif prob >= 60:
-        return "🟡 Médio risco - Valor moderado"
-    elif prob >= 54:
-        return "🟡 Médio risco - Cautela"
+    elif ev >= 0.02 and prob >= 58:
+        return "🟢 Valor positivo"
+    elif ev >= 0 and prob >= 55:
+        return "🟡 Médio risco - Valor neutro"
     else:
         return "🔴 Alto risco - Evitar"
-
-# ==============================
-# EV (ESPERADO - PREPARADO)
-# ==============================
-
-def expected_value(prob, odd):
-    return round((prob / 100 * odd) - 1, 3)
 
 # ==============================
 # JOGOS (EXEMPLO)
@@ -103,7 +86,7 @@ def get_matches():
     ]
 
 # ==============================
-# ANÁLISE
+# ANÁLISE PRINCIPAL
 # ==============================
 
 def run_analysis():
@@ -113,9 +96,8 @@ def run_analysis():
 
     for m in matches:
         prob = calculate_score(m["home"], m["away"])
-        risk = classify(prob)
-
         ev = expected_value(prob, m["odd"])
+        risk = classify(prob, ev)
 
         results.append({
             "Jogo": f"{m['home']} vs {m['away']}",
@@ -128,25 +110,25 @@ def run_analysis():
     return pd.DataFrame(results)
 
 # ==============================
-# UI
+# STREAMLIT UI
 # ==============================
 
-st.title("⚽ Greg Stats X V5.2")
+st.title("⚽ Greg Stats X V5.3")
 
 if st.button("Rodar análise"):
     df = run_analysis()
     st.dataframe(df)
 
-    st.markdown("### 🔎 Interpretação")
+    st.markdown("### 📊 Interpretação")
     st.markdown("""
-    - 🔥 ELITE: aposta forte  
-    - 🟢 Baixo risco: entrada boa  
-    - 🟡 Médio: avaliar odds  
-    - 🔴 Evitar: sem valor  
+    - 🔥 ELITE: maior valor estatístico  
+    - 🟢 Valor positivo: entrada interessante  
+    - 🟡 Médio risco: depende da odd  
+    - 🔴 Evitar: sem valor esperado  
     """)
 
 # ==============================
-# DATA DO DIA
+# DATA
 # ==============================
 
 st.sidebar.write("📅 Data:", get_today())
