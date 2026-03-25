@@ -1,6 +1,6 @@
+import streamlit as st
 import requests
 import pandas as pd
-import math
 from datetime import datetime
 
 # ==============================
@@ -35,109 +35,85 @@ def get_matches(date):
         return matches
 
     except Exception as e:
-        print("Erro ao buscar jogos:", e)
+        st.error(f"Erro ao buscar jogos: {e}")
         return []
 
 
 # ==============================
-# MODELO SIMPLES (ROBUSTO)
+# MODELO SIMPLES
 # ==============================
 
-def team_strength(team):
+def strength(team):
 
-    elite = ["Real Madrid", "Manchester City", "Bayern Munich", "Barcelona"]
-
-    strong = ["Arsenal", "Liverpool", "PSG", "Chelsea"]
+    elite = ["Real Madrid", "Manchester City", "Bayern Munich"]
 
     if team in elite:
-        return 2.3
-
-    elif team in strong:
-        return 2.0
+        return 2.2
 
     return 1.5
 
 
-def calculate_prob(home, away):
+def predict(home, away):
 
-    h = team_strength(home)
-    a = team_strength(away)
+    diff = strength(home) - strength(away)
 
-    diff = h - a
-
-    prob = 50 + (diff * 20)
+    prob = 50 + diff * 20
 
     return max(5, min(95, prob))
 
 
-# ==============================
-# EV
-# ==============================
-
-def expected_value(prob, odd):
-
-    return round((prob / 100) - (1 / odd), 3)
+def ev(prob, odd):
+    return (prob / 100) - (1 / odd)
 
 
-# ==============================
-# PICK
-# ==============================
-
-def get_pick(prob, ev):
+def pick(prob, ev):
 
     if ev <= 0:
         return "❌ NO BET"
 
-    if prob >= 55:
+    if prob > 55:
         return "🏠 HOME"
 
-    if prob <= 45:
+    if prob < 45:
         return "✈️ AWAY"
 
     return "❌ NO BET"
 
 
 # ==============================
-# EXECUÇÃO
+# STREAMLIT UI
 # ==============================
 
-def run_analysis(date):
+st.title("⚽ Scanner de Jogos")
 
-    matches = get_matches(date)
+date = st.date_input("Escolha a data", datetime.today())
 
-    results = []
+if st.button("Rodar Análise"):
 
-    for home, away in matches:
+    date_str = date.strftime("%Y-%m-%d")
 
-        prob = calculate_prob(home, away)
+    matches = get_matches(date_str)
 
-        odd = 1.90  # pode integrar depois
+    if not matches:
+        st.warning("Nenhum jogo encontrado")
+    else:
 
-        ev = expected_value(prob, odd)
+        results = []
 
-        pick = get_pick(prob, ev)
+        for home, away in matches:
 
-        results.append({
-            "Jogo": f"{home} vs {away}",
-            "Probabilidade": round(prob, 2),
-            "Odd": odd,
-            "EV": ev,
-            "Pick": pick
-        })
+            prob = predict(home, away)
+            odd = 1.9
+            ev_value = ev(prob, odd)
+            p = pick(prob, ev_value)
 
-    return pd.DataFrame(results)
+            results.append({
+                "Jogo": f"{home} vs {away}",
+                "Probabilidade": round(prob, 2),
+                "EV": round(ev_value, 3),
+                "Pick": p
+            })
 
+        df = pd.DataFrame(results)
 
-# ==============================
-# MAIN
-# ==============================
-
-if __name__ == "__main__":
-
-    date = datetime.today().strftime("%Y-%m-%d")
-
-    df = run_analysis(date)
-
-    print(df)
-
-    df.to_csv(f"analise_{date}.csv", index=False)
+        st.dataframe(df)
