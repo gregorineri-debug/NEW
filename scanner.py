@@ -1,116 +1,101 @@
-import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
 import pandas as pd
-from datetime import datetime
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
+import time
 
 # ==============================
-# BUSCAR JOGOS (API SIMPLES)
+# INICIAR NAVEGADOR
+# ==============================
+
+options = webdriver.ChromeOptions()
+options.add_argument("--headless")  # roda sem abrir janela
+
+driver = webdriver.Chrome(
+    service=Service(ChromeDriverManager().install()),
+    options=options
+)
+
+# ==============================
+# PEGAR JOGOS
 # ==============================
 
 def get_matches():
 
-    url = "https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=2024-01-01&s=Soccer"
+    url = "https://www.espn.com/soccer/fixtures"
 
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        data = res.json()
+    driver.get(url)
+    time.sleep(5)
 
-        matches = []
+    matches = []
 
-        for m in data.get("events", []):
+    rows = driver.find_elements(By.TAG_NAME, "tr")
 
-            home = m.get("strHomeTeam")
-            away = m.get("strAwayTeam")
+    for row in rows:
+
+        spans = row.find_elements(By.TAG_NAME, "span")
+
+        if len(spans) >= 2:
+
+            home = spans[0].text
+            away = spans[1].text
 
             if home and away:
                 matches.append((home, away))
 
-        return matches
-
-    except:
-        return []
+    return matches
 
 
 # ==============================
-# DADOS SIMPLIFICADOS POR TIME
+# SIMULAÇÃO DE DADOS
 # ==============================
 
-def get_team_data(team):
-
-    # simulação controlada (evita falha total)
-    base_strength = {
-        "Real Madrid": 2.2,
-        "Barcelona": 2.1,
-        "Manchester City": 2.3,
-        "Arsenal": 1.9
-    }
-
-    strength = base_strength.get(team, 1.3)
+def get_team_stats(team):
 
     return {
-        "xg": strength,
-        "xga": 1.5,
-        "form": strength / 3
+        "xg": 1.5,
+        "xga": 1.3,
+        "form": 0.6
     }
 
 
 # ==============================
-# MONTAR DATASET
+# ANALISE
 # ==============================
 
-def build_dataset():
+def analyze(matches):
 
-    matches = get_matches()
-
-    if not matches:
-        print("Nenhum jogo encontrado")
-        return pd.DataFrame()
-
-    rows = []
+    results = []
 
     for home, away in matches:
 
-        h = get_team_data(home)
-        a = get_team_data(away)
+        h = get_team_stats(home)
+        a = get_team_stats(away)
 
-        rows.append({
+        score = 50 + ((h["xg"] - a["xga"]) * 20)
+
+        results.append({
             "home": home,
             "away": away,
-
-            "home_xg": h["xg"],
-            "away_xg": a["xg"],
-
-            "home_form": h["form"],
-            "away_form": a["form"],
+            "score": round(score, 2)
         })
 
-    return pd.DataFrame(rows)
-
-
-# ==============================
-# EXPORTAR
-# ==============================
-
-def save_csv(df):
-
-    if df.empty:
-        print("DataFrame vazio")
-        return
-
-    filename = f"matches_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    df.to_csv(filename, index=False)
-
-    print(f"CSV salvo: {filename}")
+    return pd.DataFrame(results)
 
 
 # ==============================
 # EXECUÇÃO
 # ==============================
 
-df = build_dataset()
+matches = get_matches()
+
+print("Jogos encontrados:", len(matches))
+
+df = analyze(matches)
 
 print(df)
 
-save_csv(df)
+df.to_csv("jogos.csv", index=False)
+
+driver.quit()
