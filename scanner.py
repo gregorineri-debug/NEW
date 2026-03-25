@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
-import requests
-from bs4 import BeautifulSoup
 import math
+from datetime import datetime
 
 # ==============================
-# DADOS
+# BASE DE DADOS (SIMULADA)
 # ==============================
 
 def get_team_data(team):
@@ -16,14 +15,16 @@ def get_team_data(team):
         "Manchester City": {"xg": 2.4, "xga": 0.9, "form": 0.78},
         "Arsenal": {"xg": 2.0, "xga": 1.1, "form": 0.72},
         "CRB": {"xg": 1.1, "xga": 1.3, "form": 0.48},
-        "Sport": {"xg": 1.2, "xga": 1.4, "form": 0.50}
+        "Sport": {"xg": 1.2, "xga": 1.4, "form": 0.50},
+        "Sparta Prague": {"xg": 1.7, "xga": 1.2, "form": 0.60},
+        "Hammarby IF": {"xg": 1.6, "xga": 1.3, "form": 0.58}
     }
 
     return db.get(team, {"xg": 1.3, "xga": 1.3, "form": 0.5})
 
 
 # ==============================
-# MODELO (CALIBRADO)
+# MODELO
 # ==============================
 
 def calculate_score(home, away):
@@ -33,31 +34,25 @@ def calculate_score(home, away):
 
     raw_strength = (
         (h["xg"] - a["xga"]) +
-        (h["form"] - a["form"]) * 0.8
+        (h["form"] - a["form"]) * 0.9
     )
 
-    # 🔥 NORMALIZAÇÃO (CORRIGE 95%)
-    strength = math.tanh(raw_strength)  # limita entre -1 e +1
+    strength = math.tanh(raw_strength)
 
-    # curva mais suave (distribuição realista)
-    prob = 50 + (strength * 35)
-
-    # leve aleatoriedade controlada (evita travamento)
-    prob += (h["form"] - 0.5) * 5
+    prob = 50 + (strength * 45)
+    prob += (h["form"] - 0.5) * 6
 
     return round(max(5, min(95, prob)), 2)
 
 
 # ==============================
-# EV REAL
+# EV
 # ==============================
 
 def expected_value(prob, odd):
 
     implied = 1 / odd
-    edge = (prob / 100) - implied
-
-    return round(edge, 3)
+    return round((prob / 100) - implied, 3)
 
 
 # ==============================
@@ -66,11 +61,11 @@ def expected_value(prob, odd):
 
 def classify(prob, ev):
 
-    if ev >= 0.08 and prob >= 60:
+    if ev >= 0.06 and prob >= 62:
         return "🔥 ELITE"
-    elif ev >= 0.05:
+    elif ev >= 0.04:
         return "🟢 VALOR FORTE"
-    elif ev >= 0.03:
+    elif ev >= 0.02:
         return "🟡 VALOR"
     else:
         return "🔴 EVITAR"
@@ -92,31 +87,38 @@ def is_valid_game(home, away):
 
 
 # ==============================
-# COLETA
+# DADOS DE JOGOS (BACKTEST)
 # ==============================
 
-def get_matches():
+def get_matches_by_date(selected_date):
 
-    # fallback mais realista (não trava 50%)
-    matches = [
+    # 🔥 aqui depois você conecta com scraping real
+    # por enquanto é simulado
+
+    base_matches = [
         ("Real Madrid", "Barcelona", 1.90),
         ("Manchester City", "Arsenal", 1.85),
         ("CRB", "Sport", 2.10),
-        ("Sparta Prague", "Hammarby IF", 1.95)
+        ("Sparta Prague", "Hammarby IF", 1.95),
     ]
 
-    return matches
+    return base_matches
 
 
 # ==============================
 # APP
 # ==============================
 
-st.title("📊 Scanner Corrigido (Modelo Calibrado)")
+st.title("📊 Backtest com Data (Scanner Profissional)")
 
-if st.button("Rodar Análise"):
+# 🔥 SELETOR DE DATA
+selected_date = st.date_input("📅 Selecione a data do backtest", datetime.today())
 
-    matches = get_matches()
+st.write(f"Analisando jogos do dia: {selected_date}")
+
+if st.button("Rodar Backtest"):
+
+    matches = get_matches_by_date(selected_date)
 
     results = []
 
@@ -130,6 +132,7 @@ if st.button("Rodar Análise"):
         risk = classify(prob, ev)
 
         results.append({
+            "Data": selected_date,
             "Jogo": f"{home} vs {away}",
             "Probabilidade (%)": prob,
             "Odd": odd,
@@ -137,6 +140,20 @@ if st.button("Rodar Análise"):
             "Classificação": risk
         })
 
-    df = pd.DataFrame(results)
+    if results:
 
-    st.dataframe(df)
+        df = pd.DataFrame(results)
+
+        st.dataframe(df)
+
+        # 🔥 métricas do backtest
+        st.subheader("📈 Resumo")
+
+        st.write("Picks:", len(df))
+        st.write("ELITE:", len(df[df["Classificação"] == "🔥 ELITE"]))
+        st.write("VALOR FORTE:", len(df[df["Classificação"] == "🟢 VALOR FORTE"]))
+        st.write("VALOR:", len(df[df["Classificação"] == "🟡 VALOR"]))
+        st.write("EV médio:", round(df["EV"].mean(), 3))
+
+    else:
+        st.warning("Nenhum jogo encontrado para essa data.")
