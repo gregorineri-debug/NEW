@@ -3,179 +3,193 @@ import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime, timedelta, timezone
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Greg Stats X - Backtest + SofaScore", layout="wide")
+st.set_page_config(page_title="Greg Stats X Pro", layout="wide")
 
-st.title("📊 Greg Stats X - Backtest + Jogos do Dia (SofaScore)")
+st.title("📊 Greg Stats X - Análise + Backtest + Jogos do Dia")
 
 # =========================
-# ⏰ FUSO HORÁRIO (São Paulo)
+# ⏰ TIMEZONE CORRIGIDO (SÃO PAULO)
 # =========================
 tz_sp = timezone(timedelta(hours=-3))
-hoje_sp = datetime.now(tz_sp).date()
-data_api = hoje_sp.strftime("%Y-%m-%d")
+now_sp = datetime.now(tz_sp)
+
+data_api = now_sp.strftime("%Y-%m-%d")
 
 # =========================
-# 📡 FUNÇÃO SOFASCORE
+# 📡 SOFASCORE (FILTRANDO DATA CORRETA)
 # =========================
 def buscar_jogos_sofascore(data):
     url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{data}"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    response = requests.get(url, headers=headers)
+    r = requests.get(url, headers=headers)
 
-    if response.status_code != 200:
-        return pd.DataFrame()
+    if r.status_code != 200:
+        return []
 
-    data_json = response.json()
+    data_json = r.json()
 
     jogos = []
 
     for event in data_json.get("events", []):
-        jogos.append({
-            "Home": event["homeTeam"]["name"],
-            "Away": event["awayTeam"]["name"],
-            "League": event["tournament"]["name"],
-            "Timestamp": event["startTimestamp"]
-        })
+        # Converter timestamp
+        dt_utc = datetime.fromtimestamp(event["startTimestamp"], tz=timezone.utc)
+        dt_sp = dt_utc.astimezone(tz_sp)
 
-    df = pd.DataFrame(jogos)
+        # 🔥 FILTRO: somente jogos do DIA CORRETO
+        if dt_sp.date() == now_sp.date():
 
-    if not df.empty:
-        df["Date_SP"] = pd.to_datetime(df["Timestamp"], unit="s", utc=True).dt.tz_convert("America/Sao_Paulo")
+            jogos.append({
+                "Home": event["homeTeam"]["name"],
+                "Away": event["awayTeam"]["name"],
+                "League": event["tournament"]["name"],
+                "Time (SP)": dt_sp.strftime("%H:%M")
+            })
 
-    return df
+    return pd.DataFrame(jogos)
 
 # =========================
-# 📂 BACKTEST UPLOAD
+# 🧠 SCORE HÍBRIDO (BASE)
 # =========================
-st.sidebar.header("📂 Upload da Base Histórica")
+def calcular_score(jogo):
 
-uploaded_file = st.sidebar.file_uploader("Envie seu CSV", type=["csv"])
+    # 🔴 PLACEHOLDER (substituir pelo seu Greg Stats X real)
+    forma = np.random.uniform(0, 1)
+    xg_diff = np.random.uniform(-1, 1)
+    elenco = np.random.uniform(-1, 1)
+
+    # 🔥 MODELO HÍBRIDO SIMPLIFICADO
+    score = (
+        50 +
+        (forma * 20) +
+        (xg_diff * 15) +
+        (elenco * 15)
+    )
+
+    return round(score, 2)
+
+# =========================
+# 📊 ANÁLISE COMPLETA DO JOGO
+# =========================
+def analisar_jogo(row):
+
+    score_home = calcular_score(row["Home"])
+    score_away = calcular_score(row["Away"])
+
+    diff = score_home - score_away
+
+    # Probabilidade estimada
+    prob_home = 50 + (diff * 1.2)
+
+    if prob_home > 65:
+        pick = f"{row['Home']} vence"
+        risco = "🟢 Baixo risco"
+    elif prob_home > 55:
+        pick = f"{row['Home']} ou empate"
+        risco = "🟡 Médio risco"
+    else:
+        pick = "Jogo equilibrado / evitar"
+        risco = "🔴 Alto risco"
+
+    return {
+        "Score Casa": score_home,
+        "Score Fora": score_away,
+        "Diferença": round(diff, 2),
+        "Prob Casa (%)": round(prob_home, 2),
+        "Pick": pick,
+        "Risco": risco
+    }
+
+# =========================
+# 📅 BUSCAR JOGOS
+# =========================
+st.sidebar.header("📅 Jogos do Dia")
+
+if st.sidebar.button("Carregar jogos de hoje"):
+
+    jogos_df = buscar_jogos_sofascore(data_api)
+
+    if jogos_df.empty:
+        st.warning("Nenhum jogo encontrado para hoje.")
+    else:
+        st.success(f"{len(jogos_df)} jogos encontrados")
+
+        resultados = []
+
+        for _, jogo in jogos_df.iterrows():
+
+            analise = analisar_jogo(jogo)
+
+            resultados.append({
+                **jogo,
+                **analise
+            })
+
+        df_final = pd.DataFrame(resultados)
+
+        st.subheader("📊 Análise dos Jogos (Greg Stats X)")
+
+        st.dataframe(df_final)
+
+# =========================
+# 🧪 BACKTEST (BASE)
+# =========================
+st.sidebar.header("📂 Backtest")
+
+uploaded_file = st.sidebar.file_uploader("Envie CSV", type=["csv"])
 
 if uploaded_file:
+
     df = pd.read_csv(uploaded_file)
 
-    # Esperado:
-    # Score, League, Market, Odd, Result (1/0)
+    # ⚠️ Esperado:
+    # Score, League, Market, Odd, Result
 
     df["Profit"] = np.where(df["Result"] == 1, df["Odd"] - 1, -1)
 
     # =========================
     # 🎯 FILTROS
     # =========================
-    st.sidebar.header("🎯 Filtros")
-
     min_score = st.sidebar.slider("Score mínimo", 0, 100, 70)
 
-    selected_leagues = st.sidebar.multiselect(
-        "Ligas",
-        options=df["League"].unique(),
-        default=df["League"].unique()
-    )
+    leagues = df["League"].unique()
+    markets = df["Market"].unique()
 
-    selected_markets = st.sidebar.multiselect(
-        "Mercados",
-        options=df["Market"].unique(),
-        default=df["Market"].unique()
-    )
+    selected_leagues = st.sidebar.multiselect("Ligas", leagues, default=leagues)
+    selected_markets = st.sidebar.multiselect("Mercados", markets, default=markets)
 
-    filtered_df = df[
+    filtered = df[
         (df["Score"] >= min_score) &
         (df["League"].isin(selected_leagues)) &
         (df["Market"].isin(selected_markets))
-    ].copy()
+    ]
 
     # =========================
     # 📊 MÉTRICAS
     # =========================
-    total_bets = len(filtered_df)
-    total_profit = filtered_df["Profit"].sum()
-    total_stake = total_bets
+    total = len(filtered)
+    lucro = filtered["Profit"].sum()
 
-    roi = (total_profit / total_stake) * 100 if total_stake > 0 else 0
-    winrate = (filtered_df["Result"].sum() / total_bets) * 100 if total_bets > 0 else 0
+    roi = (lucro / total) * 100 if total > 0 else 0
+    winrate = (filtered["Result"].sum() / total) * 100 if total > 0 else 0
 
-    st.subheader("📈 Resultados do Backtest")
+    st.subheader("📈 Backtest")
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Lucro", f"{total_profit:.2f}")
-    col2.metric("ROI (%)", f"{roi:.2f}%")
-    col3.metric("Winrate (%)", f"{winrate:.2f}%")
+    col1.metric("Lucro", f"{lucro:.2f}")
+    col2.metric("ROI %", f"{roi:.2f}%")
+    col3.metric("Winrate %", f"{winrate:.2f}%")
 
     # =========================
     # 📉 CURVA DE BANCA
     # =========================
-    filtered_df = filtered_df.reset_index(drop=True)
-    filtered_df["Equity"] = filtered_df["Profit"].cumsum()
+    filtered = filtered.reset_index(drop=True)
+    filtered["Equity"] = filtered["Profit"].cumsum()
 
     st.subheader("📉 Curva de Banca")
 
-    fig, ax = plt.subplots()
-    ax.plot(filtered_df["Equity"])
-    ax.set_title("Evolução da Banca")
-    ax.set_xlabel("Jogos")
-    ax.set_ylabel("Lucro")
-
-    st.pyplot(fig)
-
-    # =========================
-    # 🔎 ANÁLISE POR SCORE
-    # =========================
-    st.subheader("🔎 Performance por Score")
-
-    bins = [0, 60, 70, 80, 90, 100]
-    labels = ["<60", "60-69", "70-79", "80-89", "90+"]
-
-    filtered_df["Score_Range"] = pd.cut(filtered_df["Score"], bins=bins, labels=labels)
-
-    score_table = filtered_df.groupby("Score_Range").agg(
-        Bets=("Result", "count"),
-        Wins=("Result", "sum"),
-        Profit=("Profit", "sum")
-    )
-
-    score_table["Winrate (%)"] = (score_table["Wins"] / score_table["Bets"]) * 100
-    score_table["ROI (%)"] = (score_table["Profit"] / score_table["Bets"]) * 100
-
-    st.dataframe(score_table)
+    st.line_chart(filtered["Equity"])
 
 else:
-    st.info("⬆️ Faça upload do CSV para análise")
-
-# =========================
-# 📡 JOGOS DO DIA (SOFASCORE)
-# =========================
-st.sidebar.header("📅 Jogos do Dia")
-
-if st.sidebar.button("Carregar jogos do dia (SofaScore)"):
-
-    jogos_df = buscar_jogos_sofascore(data_api)
-
-    if jogos_df.empty:
-        st.warning("Nenhum jogo encontrado.")
-    else:
-        st.subheader("⚽ Jogos do dia (GMT-3 São Paulo)")
-        st.dataframe(jogos_df)
-
-        st.success(f"Total de jogos encontrados: {len(jogos_df)}")
-
-# =========================
-# 🔮 ESPAÇO PARA SEU MODELO
-# =========================
-st.subheader("🧠 Integração com Greg Stats X")
-
-st.info("""
-Aqui você deve integrar sua lógica de score (Greg Stats X V4.5).
-
-Para cada jogo:
-1. Calcular Score
-2. Converter para probabilidade
-3. Comparar com odds
-4. Aplicar filtro de EV
-5. Gerar apostas
-""")
+    st.info("Envie um CSV para análise")
