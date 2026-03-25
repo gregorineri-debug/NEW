@@ -1,113 +1,40 @@
-import requests
 import pandas as pd
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
 # ==============================
-# SCRAPER ROBUSTO
+# DADOS (BASE REALISTA)
 # ==============================
 
-def get_fbref_table():
+def get_team_data(team):
 
-    url = "https://fbref.com/en/comps/9/Premier-League-Stats"
+    db = {
+        "Manchester City": {"xg": 2.4, "xga": 0.9, "form": 0.78},
+        "Arsenal": {"xg": 2.0, "xga": 1.1, "form": 0.72},
+        "Barcelona": {"xg": 2.2, "xga": 1.0, "form": 0.75},
+        "Real Madrid": {"xg": 2.1, "xga": 1.0, "form": 0.74},
+        "CRB": {"xg": 1.1, "xga": 1.3, "form": 0.48},
+        "Sport": {"xg": 1.2, "xga": 1.4, "form": 0.50}
+    }
 
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-
-        if res.status_code != 200:
-            print("Erro HTTP:", res.status_code)
-            return None
-
-        tables = pd.read_html(res.text)
-
-        print(f"Tabelas encontradas: {len(tables)}")
-
-        # tenta achar tabela com "Squad" ou "Team"
-        for i, t in enumerate(tables):
-
-            for col in t.columns:
-                if "Squad" in str(col) or "Team" in str(col):
-                    print(f"Usando tabela {i}")
-                    return t
-
-        # fallback: maior tabela
-        df = max(tables, key=lambda x: x.shape[1])
-
-        return df
-
-    except Exception as e:
-        print("Erro no scraping:", e)
-        return None
+    return db.get(team, {"xg": 1.3, "xga": 1.3, "form": 0.5})
 
 
 # ==============================
-# DADOS DO TIME
+# MODELO
 # ==============================
 
-def get_team_data(team, df):
+def calculate_score(home, away):
 
-    # fallback padrão (NUNCA quebra)
-    fallback = {"xg": 1.3, "xga": 1.3, "form": 0.5}
-
-    if df is None:
-        return fallback
-
-    try:
-        row = df[df.iloc[:, 0].astype(str).str.contains(team, na=False)]
-
-        if row.empty:
-            print(f"Time não encontrado: {team}")
-            return fallback
-
-        row = row.iloc[0]
-
-        xg = 1.3
-        xga = 1.3
-
-        for col in df.columns:
-            col_str = str(col).lower()
-
-            try:
-                val = float(row[col])
-            except:
-                continue
-
-            if "xg" in col_str and "against" not in col_str:
-                xg = val
-
-            if "against" in col_str and "xg" in col_str:
-                xga = val
-
-        form = (xg - xga) / 2 + 0.5
-
-        return {
-            "xg": xg,
-            "xga": xga,
-            "form": form
-        }
-
-    except Exception as e:
-        print("Erro no time:", e)
-        return fallback
-
-
-# ==============================
-# MODELO CALIBRADO
-# ==============================
-
-def calculate_score(home, away, df):
-
-    home_data = get_team_data(home, df)
-    away_data = get_team_data(away, df)
+    home_data = get_team_data(home)
+    away_data = get_team_data(away)
 
     strength = (
-        (home_data["xg"] - away_data["xga"]) * 2.2 +
+        (home_data["xg"] - away_data["xga"]) * 2.0 +
         (home_data["form"] - away_data["form"]) * 1.5
     )
 
-    prob = 50 + (strength * 22)
+    prob = 50 + (strength * 20)
 
-    # dispersão (corrige travamento em 53%)
+    # dispersão (corrige 53% travado)
     if prob > 65:
         prob += 5
     elif prob < 45:
@@ -117,7 +44,7 @@ def calculate_score(home, away, df):
 
 
 # ==============================
-# EXPECTED VALUE
+# EV
 # ==============================
 
 def expected_value(prob, odd):
@@ -145,7 +72,6 @@ def classify(prob, ev):
 # ==============================
 
 def get_matches():
-
     return [
         ("Manchester City", "Arsenal", 1.85),
         ("Barcelona", "Real Madrid", 1.90),
@@ -154,39 +80,38 @@ def get_matches():
 
 
 # ==============================
-# EXECUÇÃO PRINCIPAL
+# ANÁLISE
 # ==============================
 
 def run():
 
-    df = get_fbref_table()
+    results = []
 
-    if df is None:
-        print("\n⚠️ Usando fallback (sem scraping)\n")
+    for home, away, odd in get_matches():
 
-    matches = get_matches()
-
-    for home, away, odd in matches:
-
-        prob = calculate_score(home, away, df)
+        prob = calculate_score(home, away)
         ev = expected_value(prob, odd)
         risk = classify(prob, ev)
 
-        print(f"\n{home} vs {away}")
-        print(f"Probabilidade: {prob}%")
-        print(f"Odd: {odd}")
-        print(f"EV: {ev}")
-        print(f"Classificação: {risk}")
-        print("-" * 40)
+        results.append({
+            "Jogo": f"{home} vs {away}",
+            "Probabilidade": prob,
+            "Odd": odd,
+            "EV": ev,
+            "Classificação": risk
+        })
+
+    df = pd.DataFrame(results)
+
+    print("\nRESULTADO:\n")
+    print(df)
 
 
 # ==============================
-# BACKTEST SIMPLES
+# BACKTEST
 # ==============================
 
 def backtest():
-
-    df = get_fbref_table()
 
     matches = [
         ("Manchester City", "Arsenal", 1.85, 1),
@@ -194,24 +119,21 @@ def backtest():
         ("CRB", "Sport", 2.10, 0)
     ]
 
-    results = []
+    correct = 0
 
     for home, away, odd, real in matches:
 
-        prob = calculate_score(home, away, df)
+        prob = calculate_score(home, away)
 
         pred = 1 if prob > 55 else 0
 
-        results.append({
-            "Jogo": f"{home} vs {away}",
-            "Prob": prob,
-            "Acertou": pred == real
-        })
+        if pred == real:
+            correct += 1
 
-    print("\nBACKTEST:\n")
+    acc = correct / len(matches)
 
-    for r in results:
-        print(r)
+    print("\nBACKTEST")
+    print(f"Acurácia: {round(acc * 100, 2)}%")
 
 
 # ==============================
@@ -221,7 +143,4 @@ def backtest():
 if __name__ == "__main__":
 
     run()
-
-    print("\n=================\n")
-
     backtest()
