@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 
 # ==============================
-# TIMES (modelo)
+# MODELO DE TIMES
 # ==============================
 
 def get_team_data(team):
@@ -21,7 +22,7 @@ def get_team_data(team):
 
 
 # ==============================
-# MODELO
+# MODELO (AJUSTADO)
 # ==============================
 
 def calculate_score(home, away):
@@ -30,11 +31,11 @@ def calculate_score(home, away):
     away_data = get_team_data(away)
 
     strength = (
-        (home_data["xg"] - away_data["xga"]) * 2 +
-        (home_data["form"] - away_data["form"]) * 1.5
+        (home_data["xg"] - away_data["xga"]) * 1.8 +
+        (home_data["form"] - away_data["form"]) * 1.2
     )
 
-    prob = 50 + strength * 20
+    prob = 50 + (strength * 18)
 
     return round(max(1, min(99, prob)), 2)
 
@@ -45,7 +46,7 @@ def expected_value(prob, odd):
 
 def classify(prob, ev):
 
-    if ev >= 0.07:
+    if ev >= 0.07 and prob >= 65:
         return "🔥 ELITE"
     elif ev >= 0.04:
         return "🟢 VALOR FORTE"
@@ -56,34 +57,38 @@ def classify(prob, ev):
 
 
 # ==============================
-# COLETA DE JOGOS (API)
+# SCRAPING DE JOGOS
 # ==============================
 
 def get_matches():
 
-    url = "https://api.football-data.org/v4/matches"
+    url = "https://www.espn.com/soccer/fixtures"
 
     headers = {
-        "X-Auth-Token": "SUA_API_KEY_AQUI"
+        "User-Agent": "Mozilla/5.0"
     }
 
     try:
-        res = requests.get(url, headers=headers)
-        data = res.json()
+        res = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
 
         matches = []
 
-        for m in data.get("matches", []):
+        rows = soup.find_all("tr")
 
-            home = m["homeTeam"]["name"]
-            away = m["awayTeam"]["name"]
+        for r in rows:
 
-            # filtro simples (evita dados irrelevantes)
-            if home and away:
+            teams = r.find_all("a")
 
-                matches.append((home, away, 1.90))
+            if len(teams) >= 2:
 
-        return matches[:10]
+                home = teams[0].text.strip()
+                away = teams[1].text.strip()
+
+                if home and away and home != away:
+                    matches.append((home, away, 1.90))
+
+        return matches[:15]
 
     except:
 
@@ -96,12 +101,14 @@ def get_matches():
 
 st.title("📊 Scanner Automático de Jogos")
 
-if st.button("Buscar Jogos e Analisar"):
+if st.button("Rodar Análise"):
 
     matches = get_matches()
 
     if not matches:
-        st.warning("Nenhum jogo encontrado (API ou token inválido)")
+
+        st.error("❌ Nenhum jogo encontrado. (site pode ter bloqueado scraping)")
+
     else:
 
         results = []
@@ -114,7 +121,7 @@ if st.button("Buscar Jogos e Analisar"):
 
             results.append({
                 "Jogo": f"{home} vs {away}",
-                "Probabilidade": prob,
+                "Probabilidade (%)": prob,
                 "Odd": odd,
                 "EV": ev,
                 "Classificação": risk
