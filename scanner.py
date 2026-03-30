@@ -17,10 +17,6 @@ VALID_LEAGUE_IDS = [
     238,239,152,40,215,52,278
 ]
 
-# -------------------------
-# MODELOS POR LIGA
-# -------------------------
-
 DOMINANCE = [17,8,35,23,34,37,238]
 CONSISTENCY = [325,390,155,703]
 BALANCED = [18,54,53,182,131,239]
@@ -34,29 +30,93 @@ def get_events(date):
     url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date}"
     return requests.get(url).json().get("events", [])
 
+def get_team_matches(team_id, limit=10):
+    url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{limit}"
+    return requests.get(url).json().get("events", [])
+
 # -------------------------
 # FILTROS
 # -------------------------
 
-def is_valid_league(event):
+def is_valid_league(e):
     try:
-        return event["tournament"]["uniqueTournament"]["id"] in VALID_LEAGUE_IDS
+        return e["tournament"]["uniqueTournament"]["id"] in VALID_LEAGUE_IDS
     except:
         return False
 
-
-def is_same_day_br(event, selected_date):
-    utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=pytz.utc)
-    return utc.astimezone(BR_TZ).date() == selected_date
+def is_same_day_br(e, date):
+    utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
+    return utc.astimezone(BR_TZ).date() == date
 
 # -------------------------
-# DADOS
+# FORMA GERAL (10 jogos)
 # -------------------------
 
-def get_team_last_matches(team_id):
-    url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/5"
-    return requests.get(url).json().get("events", [])
+def calculate_form_10(team_id):
 
+    matches = get_team_matches(team_id, 10)
+
+    pts, total = 0, 0
+
+    for m in matches:
+        try:
+            hs = m["homeScore"]["current"]
+            as_ = m["awayScore"]["current"]
+
+            if m["homeTeam"]["id"] == team_id:
+                if hs > as_: pts += 3
+                elif hs == as_: pts += 1
+            else:
+                if as_ > hs: pts += 3
+                elif hs == as_: pts += 1
+
+            total += 3
+        except:
+            continue
+
+    return pts / total if total else 0.5
+
+# -------------------------
+# CASA / FORA (5 jogos)
+# -------------------------
+
+def calculate_home_away_strength(team_id):
+
+    matches = get_team_matches(team_id, 10)
+
+    home_pts = home_total = 0
+    away_pts = away_total = 0
+
+    home_count = away_count = 0
+
+    for m in matches:
+        try:
+            hs = m["homeScore"]["current"]
+            as_ = m["awayScore"]["current"]
+
+            if m["homeTeam"]["id"] == team_id and home_count < 5:
+                if hs > as_: home_pts += 3
+                elif hs == as_: home_pts += 1
+                home_total += 3
+                home_count += 1
+
+            elif m["awayTeam"]["id"] == team_id and away_count < 5:
+                if as_ > hs: away_pts += 3
+                elif hs == as_: away_pts += 1
+                away_total += 3
+                away_count += 1
+
+        except:
+            continue
+
+    home_strength = home_pts / home_total if home_total else 0.5
+    away_strength = away_pts / away_total if away_total else 0.5
+
+    return home_strength, away_strength
+
+# -------------------------
+# xG / SHOTS
+# -------------------------
 
 def get_event_stats(event_id):
     try:
@@ -69,116 +129,70 @@ def get_event_stats(event_id):
                 for s in g["statisticsItems"]:
                     if s["name"] == name:
                         return float(s["home"]), float(s["away"])
-            return 0, 0
+            return 0,0
 
         return find("Expected goals"), find("Total shots")
     except:
         return (0,0),(0,0)
 
-# -------------------------
-# BASE
-# -------------------------
-
-def calculate_form(team_id):
-    matches = get_team_last_matches(team_id)
-    points = 0
-    total = 0
-
-    for m in matches:
-        try:
-            hs = m["homeScore"]["current"]
-            as_ = m["awayScore"]["current"]
-
-            if m["homeTeam"]["id"] == team_id:
-                if hs > as_: points += 3
-                elif hs == as_: points += 1
-            else:
-                if as_ > hs: points += 3
-                elif hs == as_: points += 1
-
-            total += 3
-        except:
-            continue
-
-    return points / total if total else 0.5
-
-
-def calculate_home_strength(team_id):
-    matches = get_team_last_matches(team_id)
-    points = 0
-    total = 0
-
-    for m in matches:
-        try:
-            if m["homeTeam"]["id"] != team_id:
-                continue
-
-            hs = m["homeScore"]["current"]
-            as_ = m["awayScore"]["current"]
-
-            if hs > as_: points += 3
-            elif hs == as_: points += 1
-
-            total += 3
-        except:
-            continue
-
-    return points / total if total else 0.5
-
 
 def calculate_averages(team_id):
-    matches = get_team_last_matches(team_id)
-    xg_total = 0
-    shots_total = 0
-    count = 0
+
+    matches = get_team_matches(team_id, 10)
+
+    xg_total = shots_total = count = 0
 
     for m in matches:
         try:
-            (xg_h,xg_a),(s_h,s_a) = get_event_stats(m["id"])
+            (xh,xa),(sh,sa) = get_event_stats(m["id"])
 
             if m["homeTeam"]["id"] == team_id:
-                xg_total += xg_h
-                shots_total += s_h
+                xg_total += xh
+                shots_total += sh
             else:
-                xg_total += xg_a
-                shots_total += s_a
+                xg_total += xa
+                shots_total += sa
 
             count += 1
         except:
             continue
 
     if count == 0:
-        return 1, 10
+        return 1,10
 
-    return xg_total / count, shots_total / count
+    return xg_total/count, shots_total/count
 
 # -------------------------
 # MODELOS
 # -------------------------
 
-def model_dominance(home_id, away_id):
-    hxg, hs = calculate_averages(home_id)
-    axg, as_ = calculate_averages(away_id)
+def model_dominance(h,a):
+    hxg,hs = calculate_averages(h)
+    axg,as_ = calculate_averages(a)
+    return (hxg-axg)*1.5 + (hs-as_)*0.05
 
-    return (hxg - axg)*1.5 + (hs - as_)*0.05
+def model_consistency(h,a):
+    hf = calculate_form_10(h)
+    af = calculate_form_10(a)
 
+    h_home,_ = calculate_home_away_strength(h)
+    _,a_away = calculate_home_away_strength(a)
 
-def model_consistency(home_id, away_id):
-    return (calculate_form(home_id) - calculate_form(away_id))*1.8 + calculate_home_strength(home_id)
+    return (hf-af)*1.5 + (h_home - a_away)
 
+def model_balanced(h,a):
+    hf = calculate_form_10(h)
+    af = calculate_form_10(a)
 
-def model_balanced(home_id, away_id):
-    hf = calculate_form(home_id)
-    af = calculate_form(away_id)
-    hxg, _ = calculate_averages(home_id)
-    axg, _ = calculate_averages(away_id)
+    hxg,_ = calculate_averages(h)
+    axg,_ = calculate_averages(a)
 
-    return (hf - af)*1.2 + (hxg - axg)*0.8
+    return (hf-af)*1.2 + (hxg-axg)*0.8
 
-
-def model_chaos(home_id, away_id):
-    # 🔥 só força bruta + filtro
-    return (calculate_form(home_id) - calculate_form(away_id))*1.5
+def model_chaos(h,a):
+    hf = calculate_form_10(h)
+    af = calculate_form_10(a)
+    return (hf-af)*1.5
 
 # -------------------------
 # PREDIÇÃO
@@ -188,17 +202,17 @@ def predict(e):
 
     league_id = e["tournament"]["uniqueTournament"]["id"]
 
-    home_id = e["homeTeam"]["id"]
-    away_id = e["awayTeam"]["id"]
+    h = e["homeTeam"]["id"]
+    a = e["awayTeam"]["id"]
 
     if league_id in DOMINANCE:
-        score = model_dominance(home_id, away_id)
+        score = model_dominance(h,a)
     elif league_id in CONSISTENCY:
-        score = model_consistency(home_id, away_id)
+        score = model_consistency(h,a)
     elif league_id in BALANCED:
-        score = model_balanced(home_id, away_id)
+        score = model_balanced(h,a)
     else:
-        score = model_chaos(home_id, away_id)
+        score = model_chaos(h,a)
 
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
@@ -206,18 +220,15 @@ def predict(e):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (4 Modelos Inteligentes)")
+st.title("⚽ Scanner PRO (Contexto Real 10 + 5/5)")
 
 date = st.date_input("Escolha a data")
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
-filtered_events = [
-    e for e in events
-    if is_valid_league(e) and is_same_day_br(e, date)
-]
+filtered = [e for e in events if is_valid_league(e) and is_same_day_br(e,date)]
 
-st.write(f"Jogos válidos: {len(filtered_events)}")
+st.write(f"Jogos válidos: {len(filtered)}")
 
 # -------------------------
 # EXECUÇÃO
@@ -225,28 +236,28 @@ st.write(f"Jogos válidos: {len(filtered_events)}")
 
 if st.button("Analisar Jogos"):
 
-    results = []
+    rows = []
 
-    for e in filtered_events:
+    for e in filtered:
 
-        winner, edge = predict(e)
+        pick,edge = predict(e)
 
         if edge < 0.5:
             continue
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
-        br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
+        hora = utc.astimezone(BR_TZ).strftime("%H:%M")
 
-        results.append({
-            "Hora": br_time,
+        rows.append({
+            "Hora": hora,
             "Jogo": f"{e['homeTeam']['name']} vs {e['awayTeam']['name']}",
-            "Pick": winner,
+            "Pick": pick,
             "Edge": round(edge,2),
-            "Classificação": "ELITE" if edge >= 1 else "BOM"
+            "Classificação": "ELITE" if edge>=1 else "BOM"
         })
 
-    if results:
-        df = pd.DataFrame(results).sort_values(by="Edge", ascending=False)
+    if rows:
+        df = pd.DataFrame(rows).sort_values(by="Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
     else:
-        st.warning("Nenhuma oportunidade encontrada.")
+        st.warning("Sem oportunidades relevantes.")
