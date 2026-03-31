@@ -262,13 +262,13 @@ if st.button("Analisar Jogos"):
 
         winner, edge = predict(e)
 
-        if edge < 0.5:
+        if edge < 0.25:
             continue
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
-        tag = "ELITE" if edge >= 1.0 else "BOM"
+        tag = "ELITE" if edge >= 0.5 else "BOM"
 
         results.append({
             "Hora": br_time,
