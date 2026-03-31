@@ -217,34 +217,6 @@ def predict(e):
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
 # -------------------------
-# VALIDAÇÃO PROFISSIONAL
-# -------------------------
-
-def validate_pick(event, pick):
-    try:
-        utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=pytz.utc)
-        match_date = utc.astimezone(BR_TZ).date()
-        today = datetime.now(BR_TZ).date()
-
-        # 👉 NÃO valida jogos de hoje ou futuros
-        if match_date >= today:
-            return ""
-
-        hs = event["homeScore"]["current"]
-        as_ = event["awayScore"]["current"]
-
-        if hs is None or as_ is None:
-            return "null"
-
-        if pick == "HOME":
-            return "WIN" if hs > as_ else "LOSS"
-        else:
-            return "WIN" if as_ > hs else "LOSS"
-
-    except:
-        return "null"
-
-# -------------------------
 # UI
 # -------------------------
 
@@ -282,11 +254,7 @@ for e in events:
 
 st.write(f"Jogos válidos: {len(filtered_events)}")
 
-col1, col2 = st.columns(2)
-analyze_btn = col1.button("Analisar Jogos")
-backtest_btn = col2.button("Backtest (Validar Picks)")
-
-if analyze_btn or backtest_btn:
+if st.button("Analisar Jogos"):
 
     results = []
 
@@ -301,7 +269,6 @@ if analyze_btn or backtest_btn:
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
         tag = "ELITE" if edge >= 1.0 else "BOM"
-        result_status = validate_pick(e, winner) if backtest_btn else ""
 
         results.append({
             "Hora": br_time,
@@ -309,33 +276,12 @@ if analyze_btn or backtest_btn:
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": winner,
             "Edge": round(edge, 2),
-            "Classificação": tag,
-            "Resultado": result_status
+            "Classificação": tag
         })
 
     if results:
         df = pd.DataFrame(results).sort_values(by="Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
-
-        if backtest_btn:
-            valid = df[df["Resultado"].isin(["WIN", "LOSS"])]
-
-            if len(valid) > 0:
-                total_win = (valid["Resultado"] == "WIN").sum()
-                total_games = len(valid)
-
-                st.write(f"Winrate Total: {round((total_win/total_games)*100,2)}% ({total_win}/{total_games})")
-
-                elite = valid[valid["Classificação"] == "ELITE"]
-
-                if len(elite) > 0:
-                    elite_win = (elite["Resultado"] == "WIN").sum()
-                    st.write(f"Winrate ELITE: {round((elite_win/len(elite))*100,2)}% ({elite_win}/{len(elite)})")
-                else:
-                    st.write("Winrate ELITE: Sem jogos válidos")
-
-            else:
-                st.warning("Sem jogos finalizados para cálculo de performance.")
-
+        st.write(f"Total de picks relevantes: {len(df)}")
     else:
         st.warning("Nenhuma oportunidade encontrada.")
