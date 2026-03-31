@@ -90,7 +90,7 @@ def calc_over_rate(matches, team_id, venue=None, last_n=10):
     return over / len(filtered)
 
 # -------------------------
-# SCORE COM PESOS
+# SCORE
 # -------------------------
 
 def score_team(matches, team_id, venue=None):
@@ -104,43 +104,39 @@ def score_team(matches, team_id, venue=None):
     score = 0
 
     for n in [30,10,5]:
-
         rate = calc_over_rate(matches, team_id, venue, n)
 
-        if rate > 0.55:
+        if rate > 0.60:
             score += weights[n]
-        elif rate < 0.45:
+        elif rate < 0.40:
             score -= weights[n]
 
     return score
 
 # -------------------------
-# MOTOR PRINCIPAL
+# MOTOR NOVO (EXTREMOS)
 # -------------------------
 
-def evaluate_goals(home_id, away_id, threshold):
+def evaluate_goals(home_id, away_id):
 
     home_matches = get_team_matches(home_id, 30)
     away_matches = get_team_matches(away_id, 30)
 
-    # GERAL
     home_score = score_team(home_matches, home_id)
     away_score = score_team(away_matches, away_id)
 
-    # CASA/FORA
     home_home_score = score_team(home_matches, home_id, "home")
     away_away_score = score_team(away_matches, away_id, "away")
 
     total_score = home_score + away_score + home_home_score + away_away_score
 
-    # NORMALIZAÇÃO
     normalized = total_score / 15
 
-    # DECISÃO
-    if normalized >= threshold:
+    # EXTREMOS
+    if normalized >= 0.35:
         return "OVER 2.5", normalized
 
-    elif normalized <= -threshold:
+    elif normalized <= -0.35:
         return "UNDER 2.5", abs(normalized)
 
     return None, 0
@@ -149,21 +145,9 @@ def evaluate_goals(home_id, away_id, threshold):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Over/Under 2.5 - Profissional)")
+st.title("⚽ Scanner PRO (Extremos 2.5)")
 
 date = st.date_input("Escolha a data")
-
-mode = st.selectbox(
-    "Agressividade",
-    ["Conservador","Balanceado","Agressivo"]
-)
-
-if mode == "Conservador":
-    threshold = 0.25
-elif mode == "Balanceado":
-    threshold = 0.15
-else:
-    threshold = 0.08
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
@@ -196,8 +180,7 @@ if st.button("Analisar"):
 
         pick, score = evaluate_goals(
             e["homeTeam"]["id"],
-            e["awayTeam"]["id"],
-            threshold
+            e["awayTeam"]["id"]
         )
 
         if not pick:
