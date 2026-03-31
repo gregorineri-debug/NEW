@@ -17,7 +17,25 @@ VALID_LEAGUE_IDS = [
     238,239,152,40,215,52,278
 ]
 
-LEAGUE_NAMES = { ... }  # mantém igual
+LEAGUE_NAMES = {
+    325:"Brasileirão",390:"Série B",17:"Premier League",
+    18:"Championship",8:"La Liga",54:"La Liga 2",
+    35:"Bundesliga",44:"2. Bundesliga",23:"Serie A",
+    53:"Serie B Itália",34:"Ligue 1",182:"Ligue 2",
+    955:"Saudi Pro League",155:"Argentina Liga",
+    703:"Primera Nacional",45:"Áustria",38:"Bélgica",
+    247:"Bulgária",172:"Rep. Tcheca",11653:"Chile",
+    11539:"Colômbia Apertura",11536:"Colômbia Finalización",
+    170:"Croácia",39:"Dinamarca",808:"Egito",
+    36:"Escócia",242:"MLS",185:"Grécia",
+    37:"Eredivisie",131:"Eerste Divisie",192:"Irlanda",
+    937:"Marrocos",11621:"Liga MX Apertura",
+    11620:"Liga MX Clausura",20:"Noruega",
+    11540:"Paraguai Apertura",11541:"Paraguai Clausura",
+    406:"Peru",202:"Polônia",238:"Portugal",
+    239:"Portugal 2",152:"Romênia",40:"Suécia",
+    215:"Suíça",52:"Turquia",278:"Uruguai"
+}
 
 # -------------------------
 # API
@@ -43,10 +61,9 @@ def get_team_matches(team_id, limit=30):
 
 def calc_over_rate(matches, team_id, venue=None, last_n=10):
 
-    count = 0
-    over = 0
+    filtered = []
 
-    for m in matches[:last_n]:
+    for m in matches:
         try:
             hs = m["homeScore"]["current"]
             as_ = m["awayScore"]["current"]
@@ -54,28 +71,26 @@ def calc_over_rate(matches, team_id, venue=None, last_n=10):
             if hs is None or as_ is None:
                 continue
 
-            # filtro casa/fora
             if venue == "home" and m["homeTeam"]["id"] != team_id:
                 continue
             if venue == "away" and m["awayTeam"]["id"] != team_id:
                 continue
 
-            total = hs + as_
-
-            if total > 2.5:
-                over += 1
-
-            count += 1
+            filtered.append(hs + as_)
         except:
             continue
 
-    if count == 0:
+    if len(filtered) == 0:
         return 0.5
 
-    return over / count
+    filtered = filtered[:last_n]
+
+    over = sum(1 for g in filtered if g > 2.5)
+
+    return over / len(filtered)
 
 # -------------------------
-# MOTOR OVER/UNDER 2.5
+# MOTOR PRINCIPAL
 # -------------------------
 
 def evaluate_goals(home_id, away_id):
@@ -83,9 +98,7 @@ def evaluate_goals(home_id, away_id):
     home_matches = get_team_matches(home_id, 30)
     away_matches = get_team_matches(away_id, 30)
 
-    # -------------------------
-    # GERAL
-    # -------------------------
+    # -------- GERAL --------
     h30 = calc_over_rate(home_matches, home_id, None, 30)
     h10 = calc_over_rate(home_matches, home_id, None, 10)
     h5  = calc_over_rate(home_matches, home_id, None, 5)
@@ -94,22 +107,10 @@ def evaluate_goals(home_id, away_id):
     a10 = calc_over_rate(away_matches, away_id, None, 10)
     a5  = calc_over_rate(away_matches, away_id, None, 5)
 
-    # validação progressiva
-    if not (h30 > 0.55 and h10 > 0.55 and h5 > 0.55 and
-            a30 > 0.55 and a10 > 0.55 and a5 > 0.55):
-        over_general = False
-    else:
-        over_general = True
+    over_general = all(x > 0.55 for x in [h30,h10,h5,a30,a10,a5])
+    under_general = all(x < 0.45 for x in [h30,h10,h5,a30,a10,a5])
 
-    if not (h30 < 0.45 and h10 < 0.45 and h5 < 0.45 and
-            a30 < 0.45 and a10 < 0.45 and a5 < 0.45):
-        under_general = False
-    else:
-        under_general = True
-
-    # -------------------------
-    # CASA / FORA
-    # -------------------------
+    # -------- CASA/FORA --------
     h_home_30 = calc_over_rate(home_matches, home_id, "home", 30)
     h_home_10 = calc_over_rate(home_matches, home_id, "home", 10)
     h_home_5  = calc_over_rate(home_matches, home_id, "home", 5)
@@ -118,26 +119,17 @@ def evaluate_goals(home_id, away_id):
     a_away_10 = calc_over_rate(away_matches, away_id, "away", 10)
     a_away_5  = calc_over_rate(away_matches, away_id, "away", 5)
 
-    if not (h_home_30 > 0.55 and h_home_10 > 0.55 and h_home_5 > 0.55 and
-            a_away_30 > 0.55 and a_away_10 > 0.55 and a_away_5 > 0.55):
-        over_context = False
-    else:
-        over_context = True
+    over_context = all(x > 0.55 for x in [h_home_30,h_home_10,h_home_5,a_away_30,a_away_10,a_away_5])
+    under_context = all(x < 0.45 for x in [h_home_30,h_home_10,h_home_5,a_away_30,a_away_10,a_away_5])
 
-    if not (h_home_30 < 0.45 and h_home_10 < 0.45 and h_home_5 < 0.45 and
-            a_away_30 < 0.45 and a_away_10 < 0.45 and a_away_5 < 0.45):
-        under_context = False
-    else:
-        under_context = True
-
-    # -------------------------
-    # DECISÃO FINAL
-    # -------------------------
+    # -------- DECISÃO --------
     if over_general and over_context:
-        return "OVER 2.5", max(h5, a5)
+        confidence = (h5 + a5 + h_home_5 + a_away_5) / 4
+        return "OVER 2.5", confidence
 
     if under_general and under_context:
-        return "UNDER 2.5", 1 - max(h5, a5)
+        confidence = 1 - ((h5 + a5 + h_home_5 + a_away_5) / 4)
+        return "UNDER 2.5", confidence
 
     return None, 0
 
@@ -145,7 +137,7 @@ def evaluate_goals(home_id, away_id):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Over/Under 2.5 Profissional)")
+st.title("⚽ Scanner PRO (Over/Under 2.5)")
 
 date = st.date_input("Escolha a data")
 
@@ -170,7 +162,7 @@ for e in events:
     except:
         continue
 
-st.write(f"Jogos: {len(filtered)}")
+st.write(f"Jogos encontrados: {len(filtered)}")
 
 if st.button("Analisar"):
 
@@ -178,12 +170,12 @@ if st.button("Analisar"):
 
     for e in filtered:
 
-        result, confidence = evaluate_goals(
+        pick, conf = evaluate_goals(
             e["homeTeam"]["id"],
             e["awayTeam"]["id"]
         )
 
-        if not result:
+        if not pick:
             continue
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
@@ -191,14 +183,15 @@ if st.button("Analisar"):
 
         rows.append({
             "Hora": hora,
-            "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], ""),
+            "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
-            "Pick": result,
-            "Confiança": round(confidence,2)
+            "Pick": pick,
+            "Confiança": round(conf,2)
         })
 
     if rows:
         df = pd.DataFrame(rows).sort_values(by="Confiança", ascending=False)
         st.dataframe(df, use_container_width=True)
+        st.write(f"Total de picks: {len(df)}")
     else:
         st.warning("Nenhuma oportunidade encontrada.")
