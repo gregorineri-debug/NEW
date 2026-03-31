@@ -117,7 +117,7 @@ def get_event_stats(event_id):
         return (0,0),(0,0)
 
 # -------------------------
-# FORMA
+# MODELO
 # -------------------------
 
 def calculate_form(team_id):
@@ -173,9 +173,6 @@ def calculate_form(team_id):
 
     return points / total_weight if total_weight else 0.5
 
-# -------------------------
-# CASA
-# -------------------------
 
 def calculate_home_strength(team_id):
     matches = get_team_last_matches(team_id)
@@ -200,9 +197,6 @@ def calculate_home_strength(team_id):
 
     return points / total if total else 0.5
 
-# -------------------------
-# MÉDIAS
-# -------------------------
 
 def calculate_averages(team_id):
     matches = get_team_last_matches(team_id)
@@ -231,9 +225,6 @@ def calculate_averages(team_id):
 
     return xg_total / count, shots_total / count
 
-# -------------------------
-# SCORE
-# -------------------------
 
 def calculate_score(home_id, away_id):
     hf = calculate_form(home_id)
@@ -251,16 +242,13 @@ def calculate_score(home_id, away_id):
         home_strength
     )
 
-# -------------------------
-# PREDIÇÃO
-# -------------------------
 
 def predict(e):
     score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"])
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
 # -------------------------
-# VALIDAÇÃO (BACKTEST)
+# BACKTEST
 # -------------------------
 
 def validate_pick(event, pick):
@@ -353,5 +341,31 @@ if analyze_btn or backtest_btn:
 
         st.dataframe(df, use_container_width=True)
         st.write(f"Total de picks relevantes: {len(df)}")
+
+        # 🔥 MÉTRICAS DE PERFORMANCE
+        if backtest_btn:
+
+            valid_df = df[df["Resultado"].isin(["WIN", "LOSS"])]
+
+            if len(valid_df) > 0:
+                total_wins = (valid_df["Resultado"] == "WIN").sum()
+                total_games = len(valid_df)
+
+                elite_df = valid_df[valid_df["Classificação"] == "ELITE"]
+                elite_wins = (elite_df["Resultado"] == "WIN").sum()
+                elite_games = len(elite_df)
+
+                st.markdown("### 📊 Performance")
+
+                st.write(f"**Winrate Total:** {round((total_wins/total_games)*100,2)}% ({total_wins}/{total_games})")
+
+                if elite_games > 0:
+                    st.write(f"**Winrate ELITE:** {round((elite_wins/elite_games)*100,2)}% ({elite_wins}/{elite_games})")
+                else:
+                    st.write("**Winrate ELITE:** Sem jogos válidos")
+
+            else:
+                st.warning("Sem jogos finalizados para cálculo de performance.")
+
     else:
         st.warning("Nenhuma oportunidade encontrada.")
