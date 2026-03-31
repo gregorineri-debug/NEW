@@ -34,12 +34,19 @@ LEAGUE_NAMES = {
 }
 
 # -------------------------
-# PERFIL DE GOLS POR LIGA
+# PERFIL DE GOLS
 # -------------------------
 
 OVER15_LEAGUES = [17,18,35,44,242,37,131,20,215,36,11621,11620,202,52,39]
 UNDER35_LEAGUES = [325,390,155,703,278,11540,11541,406,11539,11536,
                    23,53,8,54,170,808,185,192,937,238,239,152,247,11653]
+
+def get_league_goal_base(lid):
+    if lid in OVER15_LEAGUES:
+        return "OVER 1.5"
+    if lid in UNDER35_LEAGUES:
+        return "UNDER 3.5"
+    return "NEUTRO"
 
 # -------------------------
 # API
@@ -134,7 +141,7 @@ def calculate_score(h, a, lid):
     return (hs - awk + adv) - (as_ - hwk + pen)
 
 # -------------------------
-# GOLS (NOVO MOTOR)
+# GOLS (MICRO)
 # -------------------------
 
 def predict_goals(h_id, a_id, lid):
@@ -144,30 +151,20 @@ def predict_goals(h_id, a_id, lid):
 
     avg = (h_gf + h_ga + a_gf + a_ga) / 2
 
-    # BASE LIGA
-    if lid in OVER15_LEAGUES:
-        if avg > 3:
-            return "OVER 2.5"
-        return "OVER 1.5"
-
-    if lid in UNDER35_LEAGUES:
-        if avg < 2:
-            return "UNDER 2.5"
-        return "UNDER 3.5"
-
-    # fallback neutro
-    if avg >= 2.8:
+    if avg >= 3:
         return "OVER 2.5"
-    elif avg <= 2.2:
+    elif avg <= 2:
         return "UNDER 2.5"
-    else:
+    elif h_gf > 1.2 and a_gf > 1.2:
         return "BTTS"
+    else:
+        return "BTTS NÃO"
 
 # -------------------------
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Motor por Liga)")
+st.title("⚽ Scanner PRO (Liga + Jogo)")
 
 date = st.date_input("Escolha a data")
 
@@ -230,6 +227,7 @@ if st.button("Analisar"):
         if pick == "AWAY" and edge < away_min:
             continue
 
+        base = get_league_goal_base(lid)
         goals = predict_goals(e["homeTeam"]["id"], e["awayTeam"]["id"], lid)
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
@@ -243,6 +241,7 @@ if st.button("Analisar"):
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
             "Edge": round(edge,2),
+            "Base Liga": base,
             "Gols": goals,
             "Classificação": tag
         })
