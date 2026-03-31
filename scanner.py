@@ -18,24 +18,28 @@ VALID_LEAGUE_IDS = [
 ]
 
 LEAGUE_NAMES = {
-    325: "Brasileirão", 390: "Série B", 17: "Premier League",
-    18: "Championship", 8: "La Liga", 54: "La Liga 2",
-    35: "Bundesliga", 44: "2. Bundesliga", 23: "Serie A",
-    53: "Serie B Itália", 34: "Ligue 1", 182: "Ligue 2",
-    955: "Saudi Pro League", 155: "Argentina Liga",
-    703: "Primera Nacional", 45: "Áustria", 38: "Bélgica",
-    247: "Bulgária", 172: "Rep. Tcheca", 11653: "Chile",
-    11539: "Colômbia Apertura", 11536: "Colômbia Finalización",
-    170: "Croácia", 39: "Dinamarca", 808: "Egito",
-    36: "Escócia", 242: "MLS", 185: "Grécia",
-    37: "Eredivisie", 131: "Eerste Divisie", 192: "Irlanda",
-    937: "Marrocos", 11621: "Liga MX Apertura",
-    11620: "Liga MX Clausura", 20: "Noruega",
-    11540: "Paraguai Apertura", 11541: "Paraguai Clausura",
-    406: "Peru", 202: "Polônia", 238: "Portugal",
-    239: "Portugal 2", 152: "Romênia", 40: "Suécia",
-    215: "Suíça", 52: "Turquia", 278: "Uruguai"
+    325:"Brasileirão",390:"Série B",17:"Premier League",18:"Championship",
+    8:"La Liga",54:"La Liga 2",35:"Bundesliga",44:"2. Bundesliga",
+    23:"Serie A",53:"Serie B Itália",34:"Ligue 1",182:"Ligue 2",
+    955:"Saudi Pro League",155:"Argentina Liga",703:"Primera Nacional",
+    45:"Áustria",38:"Bélgica",247:"Bulgária",172:"Rep. Tcheca",
+    11653:"Chile",11539:"Colômbia Apertura",11536:"Colômbia Finalización",
+    170:"Croácia",39:"Dinamarca",808:"Egito",36:"Escócia",
+    242:"MLS",185:"Grécia",37:"Eredivisie",131:"Eerste Divisie",
+    192:"Irlanda",937:"Marrocos",11621:"Liga MX Apertura",
+    11620:"Liga MX Clausura",20:"Noruega",11540:"Paraguai Apertura",
+    11541:"Paraguai Clausura",406:"Peru",202:"Polônia",
+    238:"Portugal",239:"Portugal 2",152:"Romênia",40:"Suécia",
+    215:"Suíça",52:"Turquia",278:"Uruguai"
 }
+
+# -------------------------
+# PERFIL DE GOLS POR LIGA
+# -------------------------
+
+OVER15_LEAGUES = [17,18,35,44,242,37,131,20,215,36,11621,11620,202,52,39]
+UNDER35_LEAGUES = [325,390,155,703,278,11540,11541,406,11539,11536,
+                   23,53,8,54,170,808,185,192,937,238,239,152,247,11653]
 
 # -------------------------
 # API
@@ -90,7 +94,7 @@ def get_team_stats(team_id):
     return wins/games, gf/games, ga/games
 
 # -------------------------
-# LIGAS
+# LIGAS (MANDO)
 # -------------------------
 
 STRONG_HOME = [325,390,155,703,278,11540,11541]
@@ -130,7 +134,7 @@ def calculate_score(h, a, lid):
     return (hs - awk + adv) - (as_ - hwk + pen)
 
 # -------------------------
-# GOLS
+# GOLS (NOVO MOTOR)
 # -------------------------
 
 def predict_goals(h_id, a_id, lid):
@@ -140,41 +144,44 @@ def predict_goals(h_id, a_id, lid):
 
     avg = (h_gf + h_ga + a_gf + a_ga) / 2
 
-    if lid in WEAK_HOME:
+    # BASE LIGA
+    if lid in OVER15_LEAGUES:
+        if avg > 3:
+            return "OVER 2.5"
+        return "OVER 1.5"
+
+    if lid in UNDER35_LEAGUES:
+        if avg < 2:
+            return "UNDER 2.5"
+        return "UNDER 3.5"
+
+    # fallback neutro
+    if avg >= 2.8:
         return "OVER 2.5"
-    elif lid in STRONG_HOME:
+    elif avg <= 2.2:
         return "UNDER 2.5"
     else:
-        if avg >= 2.8:
-            return "OVER 2.5"
-        elif avg <= 2.2:
-            return "UNDER 2.5"
-        else:
-            return "BTTS"
+        return "BTTS"
 
 # -------------------------
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Modo Backtest)")
+st.title("⚽ Scanner PRO (Motor por Liga)")
 
 date = st.date_input("Escolha a data")
 
-mode = st.selectbox("Agressividade", ["Conservador", "Balanceado", "Agressivo"])
+mode = st.selectbox("Agressividade", ["Conservador","Balanceado","Agressivo"])
 
 league_options = ["Todas"] + list(LEAGUE_NAMES.values())
 selected_league = st.selectbox("Liga", league_options)
 
-# thresholds dinâmicos
 if mode == "Conservador":
-    min_edge = 0.6
-    away_min = 0.7
+    min_edge, away_min = 0.6, 0.7
 elif mode == "Balanceado":
-    min_edge = 0.45
-    away_min = 0.55
+    min_edge, away_min = 0.45, 0.55
 else:
-    min_edge = 0.30
-    away_min = 0.40
+    min_edge, away_min = 0.30, 0.40
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
