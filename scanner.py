@@ -56,7 +56,7 @@ def get_team_matches(team_id, limit=30):
         return []
 
 # -------------------------
-# CALC OVER RATE
+# OVER RATE
 # -------------------------
 
 def calc_over_rate(matches, team_id, venue=None, last_n=10):
@@ -90,6 +90,31 @@ def calc_over_rate(matches, team_id, venue=None, last_n=10):
     return over / len(filtered)
 
 # -------------------------
+# SISTEMA DE PONTOS
+# -------------------------
+
+def score_team(matches, team_id, venue=None):
+
+    weights = {
+        30: 1.0,
+        10: 1.3,
+        5: 1.6
+    }
+
+    score = 0
+
+    for n in [30,10,5]:
+
+        rate = calc_over_rate(matches, team_id, venue, n)
+
+        if rate > 0.55:
+            score += weights[n]
+        elif rate < 0.45:
+            score -= weights[n]
+
+    return score
+
+# -------------------------
 # MOTOR PRINCIPAL
 # -------------------------
 
@@ -98,38 +123,21 @@ def evaluate_goals(home_id, away_id):
     home_matches = get_team_matches(home_id, 30)
     away_matches = get_team_matches(away_id, 30)
 
-    # -------- GERAL --------
-    h30 = calc_over_rate(home_matches, home_id, None, 30)
-    h10 = calc_over_rate(home_matches, home_id, None, 10)
-    h5  = calc_over_rate(home_matches, home_id, None, 5)
+    # GERAL
+    home_score = score_team(home_matches, home_id)
+    away_score = score_team(away_matches, away_id)
 
-    a30 = calc_over_rate(away_matches, away_id, None, 30)
-    a10 = calc_over_rate(away_matches, away_id, None, 10)
-    a5  = calc_over_rate(away_matches, away_id, None, 5)
+    # CASA/FORA
+    home_home_score = score_team(home_matches, home_id, "home")
+    away_away_score = score_team(away_matches, away_id, "away")
 
-    over_general = all(x > 0.55 for x in [h30,h10,h5,a30,a10,a5])
-    under_general = all(x < 0.45 for x in [h30,h10,h5,a30,a10,a5])
+    total_score = home_score + away_score + home_home_score + away_away_score
 
-    # -------- CASA/FORA --------
-    h_home_30 = calc_over_rate(home_matches, home_id, "home", 30)
-    h_home_10 = calc_over_rate(home_matches, home_id, "home", 10)
-    h_home_5  = calc_over_rate(home_matches, home_id, "home", 5)
-
-    a_away_30 = calc_over_rate(away_matches, away_id, "away", 30)
-    a_away_10 = calc_over_rate(away_matches, away_id, "away", 10)
-    a_away_5  = calc_over_rate(away_matches, away_id, "away", 5)
-
-    over_context = all(x > 0.55 for x in [h_home_30,h_home_10,h_home_5,a_away_30,a_away_10,a_away_5])
-    under_context = all(x < 0.45 for x in [h_home_30,h_home_10,h_home_5,a_away_30,a_away_10,a_away_5])
-
-    # -------- DECISÃO --------
-    if over_general and over_context:
-        confidence = (h5 + a5 + h_home_5 + a_away_5) / 4
-        return "OVER 2.5", confidence
-
-    if under_general and under_context:
-        confidence = 1 - ((h5 + a5 + h_home_5 + a_away_5) / 4)
-        return "UNDER 2.5", confidence
+    # DECISÃO
+    if total_score >= 3:
+        return "OVER 2.5", total_score
+    elif total_score <= -3:
+        return "UNDER 2.5", abs(total_score)
 
     return None, 0
 
@@ -137,7 +145,7 @@ def evaluate_goals(home_id, away_id):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Over/Under 2.5)")
+st.title("⚽ Scanner PRO (Over/Under 2.5 - Score Inteligente)")
 
 date = st.date_input("Escolha a data")
 
@@ -170,7 +178,7 @@ if st.button("Analisar"):
 
     for e in filtered:
 
-        pick, conf = evaluate_goals(
+        pick, score = evaluate_goals(
             e["homeTeam"]["id"],
             e["awayTeam"]["id"]
         )
@@ -186,11 +194,11 @@ if st.button("Analisar"):
             "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
-            "Confiança": round(conf,2)
+            "Força": round(score,2)
         })
 
     if rows:
-        df = pd.DataFrame(rows).sort_values(by="Confiança", ascending=False)
+        df = pd.DataFrame(rows).sort_values(by="Força", ascending=False)
         st.dataframe(df, use_container_width=True)
         st.write(f"Total de picks: {len(df)}")
     else:
