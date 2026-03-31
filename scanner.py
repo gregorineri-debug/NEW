@@ -40,6 +40,18 @@ def get_team_matches(team_id, n):
     url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{n}"
     return requests.get(url).json().get("events", [])
 
+# 🔥 NOVO: verificar rodadas da liga
+def league_has_10_rounds(season_id):
+    try:
+        url = f"https://api.sofascore.com/api/v1/unique-tournament/{season_id}/events/last/100"
+        events = requests.get(url).json().get("events", [])
+
+        finished = [e for e in events if e.get("status", {}).get("type") == "finished"]
+
+        return len(finished) >= 10
+    except:
+        return False
+
 # ---------------- FILTROS ----------------
 
 def is_valid_league(event):
@@ -143,40 +155,27 @@ def evaluate_match(home_id, away_id):
     home_home = get_home_away_stats(home_id, True)
     away_away = get_home_away_stats(away_id, False)
 
-    # ranking hipotético
-    if home_table["points"] > away_table["points"]:
-        table_leader = "HOME"
-    elif away_table["points"] > home_table["points"]:
-        table_leader = "AWAY"
-    else:
-        table_leader = "EQUAL"
-
-    # comparação numérica
     score_home = 0
     score_away = 0
 
-    # pontos tabela
     if home_table["points"] > away_table["points"]:
         score_home += 1
     elif away_table["points"] > home_table["points"]:
         score_away += 1
 
-    # saldo gols geral
     if home_table["gd"] > away_table["gd"]:
         score_home += 1
     elif away_table["gd"] > home_table["gd"]:
         score_away += 1
 
-    # desempenho casa vs fora
     if home_home["points"] > away_away["points"]:
         score_home += 1
     elif away_away["points"] > home_home["points"]:
         score_away += 1
 
-    # gols casa vs fora
-    if home_home["gf"] - home_home["ga"] > away_away["gf"] - away_away["ga"]:
+    if (home_home["gf"] - home_home["ga"]) > (away_away["gf"] - away_away["ga"]):
         score_home += 1
-    elif away_away["gf"] - away_away["ga"] > home_home["gf"] - home_home["ga"]:
+    elif (away_away["gf"] - away_away["ga"]) > (home_home["gf"] - home_home["ga"]):
         score_away += 1
 
     if score_home > score_away:
@@ -188,7 +187,7 @@ def evaluate_match(home_id, away_id):
 
 # ---------------- UI ----------------
 
-st.title("⚽ Scanner Tabela 10 Jogos")
+st.title("⚽ Scanner Tabela 10 Jogos + Filtro de Rodadas")
 
 date = st.date_input("Escolha a data")
 
@@ -207,8 +206,13 @@ for e in events:
     if not is_same_day_br(e, date):
         continue
 
-    league_id = e["tournament"]["uniqueTournament"]["id"]
-    league_name = LEAGUE_NAMES.get(league_id, "Outra")
+    # 🔥 NOVO FILTRO AQUI
+    season_id = e["tournament"]["uniqueTournament"]["id"]
+
+    if not league_has_10_rounds(season_id):
+        continue
+
+    league_name = LEAGUE_NAMES.get(season_id, "Outra")
 
     if selected_league != "Todas" and league_name != selected_league:
         continue
@@ -241,7 +245,7 @@ if st.button("Analisar Jogos"):
 
         results.append({
             "Hora": br_time,
-            "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
+            "Liga": LEAGUE_NAMES.get(season_id, "Outra"),
             "Jogo": f"{home} vs {away}",
             "Pick": winner,
             "Edge": edge,
