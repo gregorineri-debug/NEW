@@ -123,49 +123,27 @@ def calc_points(matches, team_id):
     return pts / total if total else 0.5
 
 
-def calc_home_away(team_id):
+def calc_home_advantage(home_id, away_id):
+    home_matches = get_team_matches(home_id, 10)
+    away_matches = get_team_matches(away_id, 10)
+
+    home_home = [m for m in home_matches if m["homeTeam"]["id"] == home_id][:5]
+    away_away = [m for m in away_matches if m["awayTeam"]["id"] == away_id][:5]
+
+    home_perf = calc_points(home_home, home_id)
+    away_perf = calc_points(away_away, away_id)
+
+    return home_perf - away_perf
+
+
+def calc_form(team_id):
     matches = get_team_matches(team_id, 10)
-
-    home_matches = []
-    away_matches = []
-
-    for m in matches:
-        try:
-            if m["homeTeam"]["id"] == team_id:
-                home_matches.append(m)
-            else:
-                away_matches.append(m)
-        except:
-            continue
-
-    home_matches = home_matches[:5]
-    away_matches = away_matches[:5]
-
-    return calc_points(home_matches, team_id), calc_points(away_matches, team_id)
-
-
-def calc_opponent_strength(matches, team_id):
-    total = 0
-    count = 0
-
-    for m in matches:
-        try:
-            opp_id = m["awayTeam"]["id"] if m["homeTeam"]["id"] == team_id else m["homeTeam"]["id"]
-            opp_matches = get_team_matches(opp_id, 5)
-
-            total += calc_points(opp_matches, opp_id)
-            count += 1
-        except:
-            continue
-
-    return total / count if count else 0.5
+    return calc_points(matches, team_id)
 
 
 def calc_xg(team_id):
     matches = get_team_matches(team_id, 5)
-
-    total = 0
-    count = 0
+    total, count = 0, 0
 
     for m in matches:
         try:
@@ -183,34 +161,27 @@ def calc_xg(team_id):
     return total / count if count else 1.0
 
 # -------------------------
-# SCORE
+# SCORE NOVO
 # -------------------------
 
 def calculate_score(home_id, away_id):
 
-    home_matches = get_team_matches(home_id, 10)
-    away_matches = get_team_matches(away_id, 10)
+    hf = calc_form(home_id)
+    af = calc_form(away_id)
 
-    hf = calc_points(home_matches, home_id)
-    af = calc_points(away_matches, away_id)
-
-    h_home, _ = calc_home_away(home_id)
-    _, a_away = calc_home_away(away_id)
-
-    hos = calc_opponent_strength(home_matches, home_id)
-    aos = calc_opponent_strength(away_matches, away_id)
+    home_adv = calc_home_advantage(home_id, away_id)
 
     hxg = calc_xg(home_id)
     axg = calc_xg(away_id)
 
     score = (
-        (hf - af) * 0.50 +
-        (h_home - a_away) * 0.35 +
-        (hos - aos) * 0.15 +
-        (hxg - axg) * 0.20
+        (hf - af) * 0.6 +
+        home_adv * 0.5 +
+        (hxg - axg) * 0.25
     )
 
     return score
+
 
 def predict(e):
     score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"])
@@ -268,7 +239,7 @@ if st.button("Analisar Jogos"):
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
-        tag = "ELITE" if edge >= 0.5 else "BOM"
+        tag = "ELITE" if edge >= 0.6 else "BOM"
 
         results.append({
             "Hora": br_time,
