@@ -90,20 +90,32 @@ def get_event_xg(event_id):
         data = requests.get(url).json()
         stats = data["statistics"][0]["groups"]
 
+        xg_h, xg_a = 0, 0
+
         for g in stats:
             for s in g["statisticsItems"]:
                 if s["name"] == "Expected goals":
-                    return float(s["home"]), float(s["away"])
-        return 0, 0
+                    xg_h = float(s["home"])
+                    xg_a = float(s["away"])
+
+        return xg_h, xg_a
     except:
         return 0, 0
 
 # -------------------------
-# MÉTRICAS
+# MÉTRICAS NOVAS
 # -------------------------
 
-def calc_points(matches, team_id):
-    pts, total = 0, 0
+def get_team_stats(team_id):
+
+    matches = get_team_matches(team_id, 10)
+
+    goals_for = 0
+    goals_against = 0
+    xg_total = 0
+    xga_total = 0
+    count = 0
+
     for m in matches:
         try:
             hs = m["homeScore"]["current"]
@@ -112,53 +124,32 @@ def calc_points(matches, team_id):
             if hs is None or as_ is None:
                 continue
 
-            if m["homeTeam"]["id"] == team_id:
-                pts += 3 if hs > as_ else 1 if hs == as_ else 0
-            else:
-                pts += 3 if as_ > hs else 1 if hs == as_ else 0
-
-            total += 3
-        except:
-            continue
-    return pts / total if total else 0.5
-
-
-def calc_home_advantage(home_id, away_id):
-    home_matches = get_team_matches(home_id, 10)
-    away_matches = get_team_matches(away_id, 10)
-
-    home_home = [m for m in home_matches if m["homeTeam"]["id"] == home_id][:5]
-    away_away = [m for m in away_matches if m["awayTeam"]["id"] == away_id][:5]
-
-    home_perf = calc_points(home_home, home_id)
-    away_perf = calc_points(away_away, away_id)
-
-    return home_perf - away_perf
-
-
-def calc_form(team_id):
-    matches = get_team_matches(team_id, 10)
-    return calc_points(matches, team_id)
-
-
-def calc_xg(team_id):
-    matches = get_team_matches(team_id, 5)
-    total, count = 0, 0
-
-    for m in matches:
-        try:
             xg_h, xg_a = get_event_xg(m["id"])
 
             if m["homeTeam"]["id"] == team_id:
-                total += xg_h
+                goals_for += hs
+                goals_against += as_
+                xg_total += xg_h
+                xga_total += xg_a
             else:
-                total += xg_a
+                goals_for += as_
+                goals_against += hs
+                xg_total += xg_a
+                xga_total += xg_h
 
             count += 1
         except:
             continue
 
-    return total / count if count else 1.0
+    if count == 0:
+        return 1,1,1,1
+
+    return (
+        goals_for / count,
+        goals_against / count,
+        xg_total / count,
+        xga_total / count
+    )
 
 # -------------------------
 # SCORE NOVO
@@ -166,29 +157,25 @@ def calc_xg(team_id):
 
 def calculate_score(home_id, away_id):
 
-    hf = calc_form(home_id)
-    af = calc_form(away_id)
+    hg, hga, hxg, hxga = get_team_stats(home_id)
+    ag, aga, axg, axga = get_team_stats(away_id)
 
-    home_adv = calc_home_advantage(home_id, away_id)
+    home_force = hg + hxg
+    away_weakness = aga + axga
 
-    hxg = calc_xg(home_id)
-    axg = calc_xg(away_id)
+    away_force = ag + axg
+    home_weakness = hga + hxga
 
-    score = (
-        (hf - af) * 0.6 +
-        home_adv * 0.5 +
-        (hxg - axg) * 0.25
-    )
+    score = (home_force - away_weakness) - (away_force - home_weakness)
 
     return score
-
 
 def predict(e):
     score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"])
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
 # -------------------------
-# UI
+# UI (INALTERADA)
 # -------------------------
 
 st.title("⚽ Scanner PRO (Filtro por Liga)")
@@ -233,13 +220,13 @@ if st.button("Analisar Jogos"):
 
         winner, edge = predict(e)
 
-        if edge < 0.25:
+        if edge < 0.30:
             continue
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
-        tag = "ELITE" if edge >= 0.6 else "BOM"
+        tag = "ELITE" if edge >= 0.8 else "BOM"
 
         results.append({
             "Hora": br_time,
