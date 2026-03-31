@@ -55,6 +55,27 @@ def get_team_matches(team_id, limit=10):
     except:
         return []
 
+def get_standings(league_id):
+
+    try:
+        url = f"https://api.sofascore.com/api/v1/unique-tournament/{league_id}/season/standings/total"
+        data = requests.get(url).json()
+
+        table = data["standings"][0]["rows"]
+
+        ranking = {}
+        total = len(table)
+
+        for i, team in enumerate(table):
+            team_id = team["team"]["id"]
+            pos = i + 1
+
+            ranking[team_id] = pos / total  # normalizado (0 topo, 1 fundo)
+
+        return ranking
+    except:
+        return {}
+
 # -------------------------
 # STATS V5
 # -------------------------
@@ -141,10 +162,10 @@ def get_home_away_stats(team_id, venue):
     return gf / count, ga / count
 
 # -------------------------
-# SCORE V5
+# SCORE V5 + RANKING
 # -------------------------
 
-def calculate_score(home_id, away_id):
+def calculate_score(home_id, away_id, ranking):
 
     hp, hg, hga = get_team_stats(home_id)
     ap, ag, aga = get_team_stats(away_id)
@@ -160,16 +181,28 @@ def calculate_score(home_id, away_id):
     home_weak = hga * 0.7 + h_home_ga * 0.3
     away_weak = aga * 0.7 + a_away_ga * 0.3
 
-    # EDGE FINAL
     score = (home_strength - away_weak) - (away_strength - home_weak)
+
+    # -------------------------
+    # AJUSTE RANKING
+    # -------------------------
+    if ranking:
+
+        hr = ranking.get(home_id, 0.5)
+        ar = ranking.get(away_id, 0.5)
+
+        diff = ar - hr  # positivo = home melhor
+
+        score += diff * 1.5
 
     return score
 
-def predict(e):
+def predict(e, ranking):
 
     score = calculate_score(
         e["homeTeam"]["id"],
-        e["awayTeam"]["id"]
+        e["awayTeam"]["id"],
+        ranking
     )
 
     if score > 0:
@@ -181,7 +214,7 @@ def predict(e):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Greg Stats X V5)")
+st.title("⚽ Scanner PRO (Greg Stats X V5 + Ranking)")
 
 date = st.date_input("Escolha a data")
 
@@ -212,9 +245,18 @@ if st.button("Analisar"):
 
     rows = []
 
+    league_rank_cache = {}
+
     for e in filtered:
 
-        pick, edge = predict(e)
+        lid = e["tournament"]["uniqueTournament"]["id"]
+
+        if lid not in league_rank_cache:
+            league_rank_cache[lid] = get_standings(lid)
+
+        ranking = league_rank_cache[lid]
+
+        pick, edge = predict(e, ranking)
 
         if edge < 0.5:
             continue
@@ -226,7 +268,7 @@ if st.button("Analisar"):
 
         rows.append({
             "Hora": hora,
-            "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
+            "Liga": LEAGUE_NAMES.get(lid, "Outra"),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
             "Edge": round(edge,2),
