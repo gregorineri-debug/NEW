@@ -4,6 +4,9 @@ from datetime import datetime
 import pytz
 import pandas as pd
 
+# -------------------------
+# CONFIG
+# -------------------------
 BR_TZ = pytz.timezone("America/Sao_Paulo")
 
 VALID_LEAGUE_IDS = [
@@ -51,21 +54,6 @@ def get_team_matches(team_id, limit=10):
         return requests.get(url).json().get("events", [])
     except:
         return []
-
-def get_odds(event_id):
-    try:
-        url = f"https://api.sofascore.com/api/v1/event/{event_id}/odds/1/all"
-        data = requests.get(url).json()
-
-        markets = data.get("markets", [])
-        for m in markets:
-            if m.get("marketName") == "Full time":
-                choices = m.get("choices", [])
-                odds = {c["name"]: float(c["odds"]) for c in choices}
-                return odds.get("1"), odds.get("2")
-    except:
-        pass
-    return None, None
 
 # -------------------------
 # STATS
@@ -142,76 +130,51 @@ def calculate_score(h, a, lid):
     return (hs - awk + adv) - (as_ - hwk + pen)
 
 # -------------------------
-# PROBABILIDADE
+# GOLS
 # -------------------------
 
-def score_to_prob(score):
-    import math
-    return 1 / (1 + math.exp(-score))
+def predict_goals(h_id, a_id, lid):
 
-# -------------------------
-# PREDICT
-# -------------------------
+    h_win, h_gf, h_ga = get_team_stats(h_id)
+    a_win, a_gf, a_ga = get_team_stats(a_id)
 
-def predict(e):
-
-    lid = e["tournament"]["uniqueTournament"]["id"]
-
-    score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"], lid)
-
-    prob_home = score_to_prob(score)
-    prob_away = 1 - prob_home
-
-    odd_home, odd_away = get_odds(e["id"])
-
-    if not odd_home or not odd_away:
-        return None
-
-    implied_home = 1 / odd_home
-    implied_away = 1 / odd_away
-
-    value_home = prob_home - implied_home
-    value_away = prob_away - implied_away
-
-    if value_home > value_away:
-        pick = "HOME"
-        edge = value_home
-        odd = odd_home
-    else:
-        pick = "AWAY"
-        edge = value_away
-        odd = odd_away
-
-    if pick == "AWAY" and edge < 0.05:
-        return None
-
-    # GOLS
-    hw, hgf, hga = get_team_stats(e["homeTeam"]["id"])
-    aw, agf, aga = get_team_stats(e["awayTeam"]["id"])
-
-    avg = (hgf + hga + agf + aga)/2
+    avg = (h_gf + h_ga + a_gf + a_ga) / 2
 
     if lid in WEAK_HOME:
-        goals = "OVER 2.5"
+        return "OVER 2.5"
     elif lid in STRONG_HOME:
-        goals = "UNDER 2.5"
+        return "UNDER 2.5"
     else:
-        goals = "OVER 2.5" if avg >= 2.8 else "UNDER 2.5" if avg <= 2.2 else "BTTS"
-
-    tag = "🔥 VALUE" if edge > 0.08 else "OK"
-
-    return pick, edge, odd, goals, tag
+        if avg >= 2.8:
+            return "OVER 2.5"
+        elif avg <= 2.2:
+            return "UNDER 2.5"
+        else:
+            return "BTTS"
 
 # -------------------------
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO + VALUE BET")
+st.title("⚽ Scanner PRO (Modo Backtest)")
 
 date = st.date_input("Escolha a data")
 
+mode = st.selectbox("Agressividade", ["Conservador", "Balanceado", "Agressivo"])
+
 league_options = ["Todas"] + list(LEAGUE_NAMES.values())
 selected_league = st.selectbox("Liga", league_options)
+
+# thresholds dinâmicos
+if mode == "Conservador":
+    min_edge = 0.6
+    away_min = 0.7
+elif mode == "Balanceado":
+    min_edge = 0.45
+    away_min = 0.55
+else:
+    min_edge = 0.30
+    away_min = 0.40
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
@@ -247,32 +210,38 @@ if st.button("Analisar"):
 
     for e in filtered:
 
-        result = predict(e)
+        lid = e["tournament"]["uniqueTournament"]["id"]
 
-        if not result:
+        score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"], lid)
+
+        pick = "HOME" if score > 0 else "AWAY"
+        edge = abs(score)
+
+        if edge < min_edge:
             continue
 
-        pick, edge, odd, goals, tag = result
-
-        if edge < 0.02:
+        if pick == "AWAY" and edge < away_min:
             continue
+
+        goals = predict_goals(e["homeTeam"]["id"], e["awayTeam"]["id"], lid)
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         hora = utc.astimezone(BR_TZ).strftime("%H:%M")
 
+        tag = "ELITE" if edge >= (min_edge + 0.3) else "BOM"
+
         rows.append({
             "Hora": hora,
-            "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], ""),
+            "Liga": LEAGUE_NAMES.get(lid, ""),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
-            "Odd": round(odd,2),
-            "Edge": round(edge,3),
+            "Edge": round(edge,2),
             "Gols": goals,
-            "Tipo": tag
+            "Classificação": tag
         })
 
     if rows:
         df = pd.DataFrame(rows).sort_values(by="Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
     else:
-        st.warning("Sem valor hoje.")
+        st.warning("Nenhuma oportunidade encontrada.")
