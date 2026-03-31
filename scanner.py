@@ -17,21 +17,74 @@ VALID_LEAGUE_IDS = [
     238,239,152,40,215,52,278
 ]
 
-LEAGUE_NAMES = { ... }  # (mantido igual ao seu)
+LEAGUE_NAMES = {
+    325: "Brasileirão",
+    390: "Série B",
+    17: "Premier League",
+    18: "Championship",
+    8: "La Liga",
+    54: "La Liga 2",
+    35: "Bundesliga",
+    44: "2. Bundesliga",
+    23: "Serie A",
+    53: "Serie B Itália",
+    34: "Ligue 1",
+    182: "Ligue 2",
+    955: "Saudi Pro League",
+    155: "Argentina Liga",
+    703: "Primera Nacional",
+    45: "Áustria",
+    38: "Bélgica",
+    247: "Bulgária",
+    172: "Rep. Tcheca",
+    11653: "Chile",
+    11539: "Colômbia Apertura",
+    11536: "Colômbia Finalización",
+    170: "Croácia",
+    39: "Dinamarca",
+    808: "Egito",
+    36: "Escócia",
+    242: "MLS",
+    185: "Grécia",
+    37: "Eredivisie",
+    131: "Eerste Divisie",
+    192: "Irlanda",
+    937: "Marrocos",
+    11621: "Liga MX Apertura",
+    11620: "Liga MX Clausura",
+    20: "Noruega",
+    11540: "Paraguai Apertura",
+    11541: "Paraguai Clausura",
+    406: "Peru",
+    202: "Polônia",
+    238: "Portugal",
+    239: "Portugal 2",
+    152: "Romênia",
+    40: "Suécia",
+    215: "Suíça",
+    52: "Turquia",
+    278: "Uruguai"
+}
 
 # -------------------------
 # API
 # -------------------------
 
 def get_events(date):
-    url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date}"
-    return requests.get(url).json().get("events", [])
+    try:
+        url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date}"
+        return requests.get(url).json().get("events", [])
+    except:
+        return []
 
 def get_team_matches(team_id, limit=10):
-    url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{limit}"
-    return requests.get(url).json().get("events", [])
+    try:
+        url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{limit}"
+        return requests.get(url).json().get("events", [])
+    except:
+        return []
 
-def get_event_stats(event_id):
+def get_event_xg(event_id):
     try:
         url = f"https://api.sofascore.com/api/v1/event/{event_id}/statistics"
         data = requests.get(url).json()
@@ -41,9 +94,9 @@ def get_event_stats(event_id):
             for s in g["statisticsItems"]:
                 if s["name"] == "Expected goals":
                     return float(s["home"]), float(s["away"])
-        return 0,0
+        return 0, 0
     except:
-        return 0,0
+        return 0, 0
 
 # -------------------------
 # MÉTRICAS
@@ -55,6 +108,9 @@ def calc_points(matches, team_id):
         try:
             hs = m["homeScore"]["current"]
             as_ = m["awayScore"]["current"]
+
+            if hs is None or as_ is None:
+                continue
 
             if m["homeTeam"]["id"] == team_id:
                 pts += 3 if hs > as_ else 1 if hs == as_ else 0
@@ -70,10 +126,22 @@ def calc_points(matches, team_id):
 def calc_home_away(team_id):
     matches = get_team_matches(team_id, 10)
 
-    home = [m for m in matches if m["homeTeam"]["id"] == team_id][:5]
-    away = [m for m in matches if m["awayTeam"]["id"] == team_id][:5]
+    home_matches = []
+    away_matches = []
 
-    return calc_points(home, team_id), calc_points(away, team_id)
+    for m in matches:
+        try:
+            if m["homeTeam"]["id"] == team_id:
+                home_matches.append(m)
+            else:
+                away_matches.append(m)
+        except:
+            continue
+
+    home_matches = home_matches[:5]
+    away_matches = away_matches[:5]
+
+    return calc_points(home_matches, team_id), calc_points(away_matches, team_id)
 
 
 def calc_opponent_strength(matches, team_id):
@@ -84,6 +152,7 @@ def calc_opponent_strength(matches, team_id):
         try:
             opp_id = m["awayTeam"]["id"] if m["homeTeam"]["id"] == team_id else m["homeTeam"]["id"]
             opp_matches = get_team_matches(opp_id, 5)
+
             total += calc_points(opp_matches, opp_id)
             count += 1
         except:
@@ -100,7 +169,7 @@ def calc_xg(team_id):
 
     for m in matches:
         try:
-            xg_h, xg_a = get_event_stats(m["id"])
+            xg_h, xg_a = get_event_xg(m["id"])
 
             if m["homeTeam"]["id"] == team_id:
                 total += xg_h
@@ -114,7 +183,7 @@ def calc_xg(team_id):
     return total / count if count else 1.0
 
 # -------------------------
-# SCORE NOVO
+# SCORE
 # -------------------------
 
 def calculate_score(home_id, away_id):
@@ -122,45 +191,34 @@ def calculate_score(home_id, away_id):
     home_matches = get_team_matches(home_id, 10)
     away_matches = get_team_matches(away_id, 10)
 
-    # Forma geral
     hf = calc_points(home_matches, home_id)
     af = calc_points(away_matches, away_id)
 
-    # Casa / Fora
     h_home, _ = calc_home_away(home_id)
     _, a_away = calc_home_away(away_id)
 
-    # Força adversário
     hos = calc_opponent_strength(home_matches, home_id)
     aos = calc_opponent_strength(away_matches, away_id)
 
-    # xG
     hxg = calc_xg(home_id)
     axg = calc_xg(away_id)
 
-    # DIFERENÇAS
-    form_diff = hf - af
-    home_away_diff = h_home - a_away
-    opp_diff = hos - aos
-    xg_diff = hxg - axg
-
     score = (
-        form_diff * 0.50 +
-        home_away_diff * 0.35 +
-        opp_diff * 0.15 +
-        xg_diff * 0.20
+        (hf - af) * 0.50 +
+        (h_home - a_away) * 0.35 +
+        (hos - aos) * 0.15 +
+        (hxg - axg) * 0.20
     )
 
     return score
-
-# -------------------------
-# RESTANTE IGUAL
-# -------------------------
 
 def predict(e):
     score = calculate_score(e["homeTeam"]["id"], e["awayTeam"]["id"])
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
+# -------------------------
+# BACKTEST
+# -------------------------
 
 def validate_pick(event, pick):
     try:
@@ -178,7 +236,7 @@ def validate_pick(event, pick):
         return "null"
 
 # -------------------------
-# UI (100% IGUAL)
+# UI
 # -------------------------
 
 st.title("⚽ Scanner PRO (Filtro por Liga)")
@@ -251,14 +309,24 @@ if analyze_btn or backtest_btn:
         st.dataframe(df, use_container_width=True)
 
         if backtest_btn:
-            valid = df[df["Resultado"].isin(["WIN","LOSS"])]
+            valid = df[df["Resultado"].isin(["WIN", "LOSS"])]
 
-            if len(valid):
-                total_win = (valid["Resultado"]=="WIN").sum()
-                elite = valid[valid["Classificação"]=="ELITE"]
+            if len(valid) > 0:
+                total_win = (valid["Resultado"] == "WIN").sum()
+                total_games = len(valid)
 
-                st.write(f"Winrate Total: {round(total_win/len(valid)*100,2)}%")
+                st.write(f"Winrate Total: {round((total_win/total_games)*100,2)}% ({total_win}/{total_games})")
 
-                if len(elite):
-                    elite_win = (elite["Resultado"]=="WIN").sum()
-                    st.write(f"Winrate ELITE: {round(elite_win/len(elite)*100,2)}%")
+                elite = valid[valid["Classificação"] == "ELITE"]
+
+                if len(elite) > 0:
+                    elite_win = (elite["Resultado"] == "WIN").sum()
+                    st.write(f"Winrate ELITE: {round((elite_win/len(elite))*100,2)}% ({elite_win}/{len(elite)})")
+                else:
+                    st.write("Winrate ELITE: Sem jogos válidos")
+
+            else:
+                st.warning("Sem jogos finalizados para cálculo de performance.")
+
+    else:
+        st.warning("Nenhuma oportunidade encontrada.")
