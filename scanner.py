@@ -217,11 +217,19 @@ def predict(e):
     return ("HOME" if score > 0 else "AWAY"), abs(score)
 
 # -------------------------
-# BACKTEST
+# VALIDAÇÃO PROFISSIONAL
 # -------------------------
 
 def validate_pick(event, pick):
     try:
+        utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=pytz.utc)
+        match_date = utc.astimezone(BR_TZ).date()
+        today = datetime.now(BR_TZ).date()
+
+        # 👉 NÃO valida jogos de hoje ou futuros
+        if match_date >= today:
+            return ""
+
         hs = event["homeScore"]["current"]
         as_ = event["awayScore"]["current"]
 
@@ -232,6 +240,7 @@ def validate_pick(event, pick):
             return "WIN" if hs > as_ else "LOSS"
         else:
             return "WIN" if as_ > hs else "LOSS"
+
     except:
         return "null"
 
