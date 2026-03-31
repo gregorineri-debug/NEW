@@ -4,6 +4,10 @@ from datetime import datetime
 import pytz
 import pandas as pd
 
+# -----------------------------
+# CONFIG
+# -----------------------------
+
 BR_TZ = pytz.timezone("America/Sao_Paulo")
 
 VALID_LEAGUE_IDS = [
@@ -30,33 +34,21 @@ LEAGUE_NAMES = {
     215:"Suíça",52:"Turquia",278:"Uruguai"
 }
 
-# ---------------- API ----------------
+# -----------------------------
+# API SOFASCORE
+# -----------------------------
 
 def get_events(date):
     url = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date}"
     return requests.get(url).json().get("events", [])
 
-def get_team_matches(team_id, n):
+def get_team_matches(team_id, n=20):
     url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{n}"
     return requests.get(url).json().get("events", [])
 
-# ---------------- FILTRO LIGA (CORRIGIDO) ----------------
-
-def league_has_10_rounds(season_id):
-    try:
-        url = f"https://api.sofascore.com/api/v1/season/{season_id}/events/last/200"
-        events = requests.get(url).json().get("events", [])
-
-        finished = [
-            e for e in events
-            if e.get("status", {}).get("type") == "finished"
-        ]
-
-        return len(finished) >= 10
-    except:
-        return False
-
-# ---------------- FILTROS ----------------
+# -----------------------------
+# FILTROS
+# -----------------------------
 
 def is_valid_league(event):
     try:
@@ -68,43 +60,25 @@ def is_same_day_br(event, selected_date):
     utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=pytz.utc)
     return utc.astimezone(BR_TZ).date() == selected_date
 
-# ---------------- TABELA 10 JOGOS ----------------
+# -----------------------------
+# REGRA PRINCIPAL (CORRIGIDA)
+# -----------------------------
+
+def team_has_10_games(team_id):
+    try:
+        matches = get_team_matches(team_id, 25)
+        finished = [m for m in matches if m.get("status", {}).get("type") == "finished"]
+        return len(finished) >= 10
+    except:
+        return False
+
+# -----------------------------
+# TABELA HIPOTÉTICA (10 JOGOS)
+# -----------------------------
 
 def get_table_stats(team_id):
 
-    matches = get_team_matches(team_id, 10)
-
-    pts = 0
-    gf = 0
-    ga = 0
-
-    for m in matches:
-        try:
-            hs = m["homeScore"]["current"]
-            as_ = m["awayScore"]["current"]
-
-            if m["homeTeam"]["id"] == team_id:
-                gf += hs
-                ga += as_
-
-                if hs > as_: pts += 3
-                elif hs == as_: pts += 1
-            else:
-                gf += as_
-                ga += hs
-
-                if as_ > hs: pts += 3
-                elif hs == as_: pts += 1
-        except:
-            continue
-
-    return {"points": pts, "gd": gf - ga, "gf": gf, "ga": ga}
-
-# ---------------- HOME / AWAY ----------------
-
-def get_home_away_stats(team_id, is_home):
-
-    matches = get_team_matches(team_id, 10)
+    matches = get_team_matches(team_id, 15)
 
     pts = 0
     gf = 0
@@ -113,6 +87,59 @@ def get_home_away_stats(team_id, is_home):
 
     for m in matches:
         try:
+            if m.get("status", {}).get("type") != "finished":
+                continue
+
+            hs = m["homeScore"]["current"]
+            as_ = m["awayScore"]["current"]
+
+            if m["homeTeam"]["id"] == team_id:
+                gf += hs
+                ga += as_
+                if hs > as_:
+                    pts += 3
+                elif hs == as_:
+                    pts += 1
+            else:
+                gf += as_
+                ga += hs
+                if as_ > hs:
+                    pts += 3
+                elif hs == as_:
+                    pts += 1
+
+            count += 1
+            if count == 10:
+                break
+
+        except:
+            continue
+
+    return {
+        "points": pts,
+        "gf": gf,
+        "ga": ga,
+        "gd": gf - ga
+    }
+
+# -----------------------------
+# HOME / AWAY (5 JOGOS)
+# -----------------------------
+
+def get_home_away_stats(team_id, is_home):
+
+    matches = get_team_matches(team_id, 20)
+
+    pts = 0
+    gf = 0
+    ga = 0
+    count = 0
+
+    for m in matches:
+        try:
+            if m.get("status", {}).get("type") != "finished":
+                continue
+
             hs = m["homeScore"]["current"]
             as_ = m["awayScore"]["current"]
 
@@ -121,16 +148,20 @@ def get_home_away_stats(team_id, is_home):
                 ga += as_
                 count += 1
 
-                if hs > as_: pts += 3
-                elif hs == as_: pts += 1
+                if hs > as_:
+                    pts += 3
+                elif hs == as_:
+                    pts += 1
 
             elif not is_home and m["awayTeam"]["id"] == team_id:
                 gf += as_
                 ga += hs
                 count += 1
 
-                if as_ > hs: pts += 3
-                elif hs == as_: pts += 1
+                if as_ > hs:
+                    pts += 3
+                elif hs == as_:
+                    pts += 1
 
             if count == 5:
                 break
@@ -138,9 +169,16 @@ def get_home_away_stats(team_id, is_home):
         except:
             continue
 
-    return {"points": pts, "gf": gf, "ga": ga}
+    return {
+        "points": pts,
+        "gf": gf,
+        "ga": ga,
+        "gd": gf - ga
+    }
 
-# ---------------- COMPARAÇÃO ----------------
+# -----------------------------
+# COMPARAÇÃO FINAL
+# -----------------------------
 
 def evaluate_match(home_id, away_id):
 
@@ -153,7 +191,7 @@ def evaluate_match(home_id, away_id):
     score_home = 0
     score_away = 0
 
-    # tabela 10 jogos
+    # tabela hipotética
     if home_table["points"] > away_table["points"]:
         score_home += 1
     elif away_table["points"] > home_table["points"]:
@@ -165,16 +203,16 @@ def evaluate_match(home_id, away_id):
     elif away_table["gd"] > home_table["gd"]:
         score_away += 1
 
-    # forma casa vs fora
+    # forma casa/fora
     if home_home["points"] > away_away["points"]:
         score_home += 1
     elif away_away["points"] > home_home["points"]:
         score_away += 1
 
-    # saldo casa vs fora
-    if (home_home["gf"] - home_home["ga"]) > (away_away["gf"] - away_away["ga"]):
+    # desempenho ofensivo/defensivo
+    if home_home["gd"] > away_away["gd"]:
         score_home += 1
-    elif (away_away["gf"] - away_away["ga"]) > (home_home["gf"] - home_home["ga"]):
+    elif away_away["gd"] > home_home["gd"]:
         score_away += 1
 
     if score_home > score_away:
@@ -184,18 +222,20 @@ def evaluate_match(home_id, away_id):
     else:
         return "SKIP", 0
 
-# ---------------- UI ----------------
+# -----------------------------
+# STREAMLIT UI
+# -----------------------------
 
-st.title("⚽ Scanner Tabela 10 Jogos (FIXED)")
+st.title("⚽ Greg Stats V5 - Scanner Evoluído")
 
 date = st.date_input("Escolha a data")
 
 league_options = ["Todas"] + list(LEAGUE_NAMES.values())
-selected_league = st.selectbox("Escolha a liga", league_options)
+selected_league = st.selectbox("Liga", league_options)
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
-filtered_events = []
+filtered = []
 
 for e in events:
 
@@ -205,26 +245,29 @@ for e in events:
     if not is_same_day_br(e, date):
         continue
 
-    # 🔥 CORREÇÃO PRINCIPAL
-    season_id = e["season"]["id"]
+    home_id = e["homeTeam"]["id"]
+    away_id = e["awayTeam"]["id"]
 
-    if not league_has_10_rounds(season_id):
+    # regra crítica
+    if not team_has_10_games(home_id):
+        continue
+    if not team_has_10_games(away_id):
         continue
 
-    league_name = LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra")
+    league = LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra")
 
-    if selected_league != "Todas" and league_name != selected_league:
+    if selected_league != "Todas" and league != selected_league:
         continue
 
-    filtered_events.append(e)
+    filtered.append(e)
 
-st.write(f"Jogos válidos: {len(filtered_events)}")
+st.write(f"Jogos válidos encontrados: {len(filtered)}")
 
-if st.button("Analisar Jogos"):
+if st.button("Analisar"):
 
     results = []
 
-    for e in filtered_events:
+    for e in filtered:
 
         home_id = e["homeTeam"]["id"]
         away_id = e["awayTeam"]["id"]
@@ -237,23 +280,17 @@ if st.button("Analisar Jogos"):
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
-        home = e["homeTeam"]["name"]
-        away = e["awayTeam"]["name"]
-
-        tag = "ELITE" if edge >= 2 else "BOM"
-
         results.append({
             "Hora": br_time,
             "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
-            "Jogo": f"{home} vs {away}",
+            "Jogo": f"{e['homeTeam']['name']} vs {e['awayTeam']['name']}",
             "Pick": winner,
             "Edge": edge,
-            "Classificação": tag
+            "Força": "ELITE" if edge >= 2 else "OK"
         })
 
     if results:
-        df = pd.DataFrame(results).sort_values(by="Edge", ascending=False)
+        df = pd.DataFrame(results).sort_values("Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
-        st.write(f"Total de picks relevantes: {len(df)}")
     else:
         st.warning("Nenhuma oportunidade encontrada.")
