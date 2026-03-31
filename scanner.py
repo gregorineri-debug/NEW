@@ -90,7 +90,7 @@ def calc_over_rate(matches, team_id, venue=None, last_n=10):
     return over / len(filtered)
 
 # -------------------------
-# SISTEMA DE PONTOS
+# SCORE COM PESOS
 # -------------------------
 
 def score_team(matches, team_id, venue=None):
@@ -118,7 +118,7 @@ def score_team(matches, team_id, venue=None):
 # MOTOR PRINCIPAL
 # -------------------------
 
-def evaluate_goals(home_id, away_id):
+def evaluate_goals(home_id, away_id, threshold):
 
     home_matches = get_team_matches(home_id, 30)
     away_matches = get_team_matches(away_id, 30)
@@ -133,11 +133,15 @@ def evaluate_goals(home_id, away_id):
 
     total_score = home_score + away_score + home_home_score + away_away_score
 
+    # NORMALIZAÇÃO
+    normalized = total_score / 15
+
     # DECISÃO
-    if total_score >= 3:
-        return "OVER 2.5", total_score
-    elif total_score <= -3:
-        return "UNDER 2.5", abs(total_score)
+    if normalized >= threshold:
+        return "OVER 2.5", normalized
+
+    elif normalized <= -threshold:
+        return "UNDER 2.5", abs(normalized)
 
     return None, 0
 
@@ -145,9 +149,21 @@ def evaluate_goals(home_id, away_id):
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Over/Under 2.5 - Score Inteligente)")
+st.title("⚽ Scanner PRO (Over/Under 2.5 - Profissional)")
 
 date = st.date_input("Escolha a data")
+
+mode = st.selectbox(
+    "Agressividade",
+    ["Conservador","Balanceado","Agressivo"]
+)
+
+if mode == "Conservador":
+    threshold = 0.25
+elif mode == "Balanceado":
+    threshold = 0.15
+else:
+    threshold = 0.08
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
@@ -180,7 +196,8 @@ if st.button("Analisar"):
 
         pick, score = evaluate_goals(
             e["homeTeam"]["id"],
-            e["awayTeam"]["id"]
+            e["awayTeam"]["id"],
+            threshold
         )
 
         if not pick:
@@ -194,11 +211,11 @@ if st.button("Analisar"):
             "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
-            "Força": round(score,2)
+            "Força (%)": round(score * 100,1)
         })
 
     if rows:
-        df = pd.DataFrame(rows).sort_values(by="Força", ascending=False)
+        df = pd.DataFrame(rows).sort_values(by="Força (%)", ascending=False)
         st.dataframe(df, use_container_width=True)
         st.write(f"Total de picks: {len(df)}")
     else:
