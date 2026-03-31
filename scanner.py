@@ -48,7 +48,7 @@ def get_events(date):
     except:
         return []
 
-def get_team_matches(team_id, limit=30):
+def get_team_matches(team_id, limit=10):
     try:
         url = f"https://api.sofascore.com/api/v1/team/{team_id}/events/last/{limit}"
         return requests.get(url).json().get("events", [])
@@ -56,12 +56,17 @@ def get_team_matches(team_id, limit=30):
         return []
 
 # -------------------------
-# OVER RATE
+# STATS V5
 # -------------------------
 
-def calc_over_rate(matches, team_id, venue=None, last_n=10):
+def get_team_stats(team_id):
 
-    filtered = []
+    matches = get_team_matches(team_id, 10)
+
+    points = 0
+    goals_for = 0
+    goals_against = 0
+    count = 0
 
     for m in matches:
         try:
@@ -71,81 +76,112 @@ def calc_over_rate(matches, team_id, venue=None, last_n=10):
             if hs is None or as_ is None:
                 continue
 
-            if venue == "home" and m["homeTeam"]["id"] != team_id:
-                continue
-            if venue == "away" and m["awayTeam"]["id"] != team_id:
-                continue
+            if m["homeTeam"]["id"] == team_id:
+                gf, ga = hs, as_
+            else:
+                gf, ga = as_, hs
 
-            filtered.append(hs + as_)
+            goals_for += gf
+            goals_against += ga
+
+            if gf > ga:
+                points += 3
+            elif gf == ga:
+                points += 1
+
+            count += 1
         except:
             continue
 
-    if len(filtered) == 0:
-        return 0.5
+    if count == 0:
+        return 1,1,1
 
-    filtered = filtered[:last_n]
-
-    over = sum(1 for g in filtered if g > 2.5)
-
-    return over / len(filtered)
+    return (
+        points / count,
+        goals_for / count,
+        goals_against / count
+    )
 
 # -------------------------
-# SCORE
+# CASA/FORA
 # -------------------------
 
-def score_team(matches, team_id, venue=None):
+def get_home_away_stats(team_id, venue):
 
-    weights = {
-        30: 1.0,
-        10: 1.3,
-        5: 1.6
-    }
+    matches = get_team_matches(team_id, 10)
 
-    score = 0
+    gf = 0
+    ga = 0
+    count = 0
 
-    for n in [30,10,5]:
-        rate = calc_over_rate(matches, team_id, venue, n)
+    for m in matches:
+        try:
+            hs = m["homeScore"]["current"]
+            as_ = m["awayScore"]["current"]
 
-        if rate > 0.60:
-            score += weights[n]
-        elif rate < 0.40:
-            score -= weights[n]
+            if hs is None or as_ is None:
+                continue
+
+            if venue == "home" and m["homeTeam"]["id"] == team_id:
+                gf += hs
+                ga += as_
+                count += 1
+
+            elif venue == "away" and m["awayTeam"]["id"] == team_id:
+                gf += as_
+                ga += hs
+                count += 1
+
+        except:
+            continue
+
+    if count == 0:
+        return 1,1
+
+    return gf / count, ga / count
+
+# -------------------------
+# SCORE V5
+# -------------------------
+
+def calculate_score(home_id, away_id):
+
+    hp, hg, hga = get_team_stats(home_id)
+    ap, ag, aga = get_team_stats(away_id)
+
+    h_home_g, h_home_ga = get_home_away_stats(home_id, "home")
+    a_away_g, a_away_ga = get_home_away_stats(away_id, "away")
+
+    # FORÇA
+    home_strength = (hp * 0.6) + (hg * 0.4)
+    away_strength = (ap * 0.6) + (ag * 0.4)
+
+    # FRAQUEZA
+    home_weak = hga * 0.7 + h_home_ga * 0.3
+    away_weak = aga * 0.7 + a_away_ga * 0.3
+
+    # EDGE FINAL
+    score = (home_strength - away_weak) - (away_strength - home_weak)
 
     return score
 
-# -------------------------
-# MOTOR NOVO (EXTREMOS)
-# -------------------------
+def predict(e):
 
-def evaluate_goals(home_id, away_id):
+    score = calculate_score(
+        e["homeTeam"]["id"],
+        e["awayTeam"]["id"]
+    )
 
-    home_matches = get_team_matches(home_id, 30)
-    away_matches = get_team_matches(away_id, 30)
-
-    home_score = score_team(home_matches, home_id)
-    away_score = score_team(away_matches, away_id)
-
-    home_home_score = score_team(home_matches, home_id, "home")
-    away_away_score = score_team(away_matches, away_id, "away")
-
-    total_score = home_score + away_score + home_home_score + away_away_score
-
-    normalized = total_score / 15
-
-    # EXTREMOS
-    if normalized >= 0.35:
-        return "OVER 2.5", normalized
-
-    elif normalized <= -0.35:
-        return "UNDER 2.5", abs(normalized)
-
-    return None, 0
+    if score > 0:
+        return "HOME", score
+    else:
+        return "AWAY", abs(score)
 
 # -------------------------
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO (Extremos 2.5)")
+st.title("⚽ Scanner PRO (Greg Stats X V5)")
 
 date = st.date_input("Escolha a data")
 
@@ -178,27 +214,27 @@ if st.button("Analisar"):
 
     for e in filtered:
 
-        pick, score = evaluate_goals(
-            e["homeTeam"]["id"],
-            e["awayTeam"]["id"]
-        )
+        pick, edge = predict(e)
 
-        if not pick:
+        if edge < 0.5:
             continue
 
         utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
         hora = utc.astimezone(BR_TZ).strftime("%H:%M")
+
+        tag = "ELITE" if edge >= 1.2 else "BOM"
 
         rows.append({
             "Hora": hora,
             "Liga": LEAGUE_NAMES.get(e["tournament"]["uniqueTournament"]["id"], "Outra"),
             "Jogo": f'{e["homeTeam"]["name"]} vs {e["awayTeam"]["name"]}',
             "Pick": pick,
-            "Força (%)": round(score * 100,1)
+            "Edge": round(edge,2),
+            "Classificação": tag
         })
 
     if rows:
-        df = pd.DataFrame(rows).sort_values(by="Força (%)", ascending=False)
+        df = pd.DataFrame(rows).sort_values(by="Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
         st.write(f"Total de picks: {len(df)}")
     else:
