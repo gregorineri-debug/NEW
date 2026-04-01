@@ -1,19 +1,18 @@
 import streamlit as st
 import requests
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 import pandas as pd
 
 # -------------------------
 # CONFIG
 # -------------------------
-BR_TZ = pytz.timezone("America/Sao_Paulo")
+BR_TZ = ZoneInfo("America/Sao_Paulo")
 
-MIN_MATCHES = 10  # 🔥 consistência mínima
+MIN_MATCHES = 10
 
-# 🔥 FORÇA DAS LIGAS
 LEAGUE_STRENGTH = {
-    17: 1.0, 8: 1.0, 23: 1.0, 35: 1.0, 34: 1.0,  # top ligas
+    17: 1.0, 8: 1.0, 23: 1.0, 35: 1.0, 34: 1.0,
     325: 0.9, 390: 0.85,
     155: 0.9,
     238: 0.9,
@@ -30,9 +29,7 @@ LEAGUE_NAMES = {
     17: "Premier League",
     18: "Championship",
     8: "La Liga",
-    54: "La Liga 2",
     35: "Bundesliga",
-    44: "2. Bundesliga",
     23: "Serie A",
     34: "Ligue 1",
     155: "Argentina Liga",
@@ -68,7 +65,7 @@ def is_valid_league(event):
 
 
 def is_same_day_br(event, selected_date):
-    utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=pytz.utc)
+    utc = datetime.utcfromtimestamp(event["startTimestamp"]).replace(tzinfo=ZoneInfo("UTC"))
     br_time = utc.astimezone(BR_TZ)
     return br_time.date() == selected_date
 
@@ -113,11 +110,11 @@ def calculate_motivation(team_id, standings):
                 total = len(standings)
 
                 if pos <= 3:
-                    return 1.0  # título
+                    return 1.0
                 elif pos >= total - 3:
-                    return 1.0  # rebaixamento
+                    return 1.0
                 else:
-                    return 0.5  # neutro
+                    return 0.5
     except:
         pass
 
@@ -133,12 +130,11 @@ def check_min_matches(standings):
 
 
 def estimate_lineup_impact(team_id):
-    # 🔥 proxy simples (sem API direta de lesões)
     matches = get_team_last_matches(team_id)
+
     if len(matches) < 3:
         return 0
 
-    # se time muito inconsistente → possível problema de elenco
     wins = 0
     for m in matches:
         try:
@@ -153,7 +149,8 @@ def estimate_lineup_impact(team_id):
             continue
 
     if wins <= 1:
-        return -0.2  # suspeita de problema
+        return -0.2
+
     return 0
 
 # -------------------------
@@ -269,7 +266,7 @@ def calculate_averages(team_id):
     return xg_total / count, shots_total / count
 
 # -------------------------
-# SCORE PRO V6
+# SCORE PRO
 # -------------------------
 
 def calculate_score(event):
@@ -282,7 +279,6 @@ def calculate_score(event):
 
     standings = get_standings(league_id, season_id)
 
-    # 🔥 CONSISTÊNCIA
     if not standings or not check_min_matches(standings):
         return None
 
@@ -302,20 +298,13 @@ def calculate_score(event):
     lineup_home = estimate_lineup_impact(home_id)
     lineup_away = estimate_lineup_impact(away_id)
 
-    form_diff = hf - af
-    xg_diff = hxg - axg
-    shots_diff = (hs - as_) * 0.05
-
-    motivation_diff = (motivation_home - motivation_away) * 0.5
-    lineup_diff = (lineup_home - lineup_away)
-
     score = (
-        (form_diff * 1.5) +
-        (xg_diff * 1.2) +
-        shots_diff +
+        (hf - af) * 1.5 +
+        (hxg - axg) * 1.2 +
+        ((hs - as_) * 0.05) +
         home_strength +
-        motivation_diff +
-        lineup_diff
+        ((motivation_home - motivation_away) * 0.5) +
+        (lineup_home - lineup_away)
     ) * league_weight
 
     return score
@@ -331,16 +320,13 @@ def predict(e):
     if score is None:
         return None, None
 
-    winner = "HOME" if score > 0 else "AWAY"
-    edge = abs(score)
-
-    return winner, edge
+    return ("HOME" if score > 0 else "AWAY"), abs(score)
 
 # -------------------------
 # UI
 # -------------------------
 
-st.title("⚽ Scanner PRO V6")
+st.title("⚽ Scanner PRO V6 (Sem pytz)")
 
 date = st.date_input("Escolha a data")
 
@@ -364,13 +350,11 @@ if st.button("Analisar Jogos"):
         if winner is None or edge < 0.5:
             continue
 
-        utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=pytz.utc)
+        utc = datetime.utcfromtimestamp(e["startTimestamp"]).replace(tzinfo=ZoneInfo("UTC"))
         br_time = utc.astimezone(BR_TZ).strftime("%H:%M")
 
         home = e["homeTeam"]["name"]
         away = e["awayTeam"]["name"]
-
-        tag = "ELITE" if edge >= 1.0 else "BOM"
 
         results.append({
             "Hora": br_time,
@@ -378,12 +362,11 @@ if st.button("Analisar Jogos"):
             "Jogo": f"{home} vs {away}",
             "Pick": winner,
             "Edge": round(edge, 2),
-            "Classificação": tag
+            "Classificação": "ELITE" if edge >= 1 else "BOM"
         })
 
     if results:
         df = pd.DataFrame(results).sort_values(by="Edge", ascending=False)
         st.dataframe(df, use_container_width=True)
-        st.write(f"Total de picks relevantes: {len(df)}")
     else:
         st.warning("Nenhuma oportunidade encontrada.")
