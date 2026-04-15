@@ -14,7 +14,10 @@ VALID_LEAGUE_IDS = [
     155,703,45,38,247,172,11653,11539,11536,
     170,39,808,36,242,185,37,131,192,937,
     11621,11620,20,11540,11541,406,202,
-    238,239,152,40,215,52,278
+    238,239,152,40,215,52,278,
+
+    # NOVAS LIGAS
+    357, 7, 679, 17015, 16, 384, 480, 133, 1
 ]
 
 LEAGUE_NAMES = {
@@ -34,7 +37,18 @@ LEAGUE_NAMES = {
     11540: "Paraguai Apertura", 11541: "Paraguai Clausura",
     406: "Peru", 202: "Polônia", 238: "Portugal",
     239: "Portugal 2", 152: "Romênia", 40: "Suécia",
-    215: "Suíça", 52: "Turquia", 278: "Uruguai"
+    215: "Suíça", 52: "Turquia", 278: "Uruguai",
+
+    # NOVAS LIGAS
+    357: "FIFA Club World Cup",
+    7: "Champions League",
+    679: "Europa League",
+    17015: "Conference League",
+    16: "FIFA World Cup",
+    384: "Libertadores",
+    480: "Sudamericana",
+    133: "Copa América",
+    1: "Eurocopa"
 }
 
 # -------------------------
@@ -100,4 +114,3 @@ if st.button("Analisar Jogos"):
         st.write(f"Total de jogos: {len(df)}")
     else:
         st.warning("Nenhum jogo encontrado.")
-        
