@@ -13,7 +13,7 @@ BR_TZ = ZoneInfo("America/Sao_Paulo")
 try:
     API_KEY = st.secrets["API_FOOTBALL_KEY"]
 except:
-    API_KEY = import http.client
+    API_KEY = "import http.client
 
 conn = http.client.HTTPSConnection("v3.football.api-sports.io")
 
@@ -26,7 +26,7 @@ conn.request("GET", "/leagues", headers=headers)
 res = conn.getresponse()
 data = res.read()
 
-print(data.decode("utf-8"))  # 👈 COLE SUA CHAVE AQUI SE NÃO USAR SECRETS
+print(data.decode("utf-8"))"  # 👈 COLE SUA CHAVE AQUI SE NÃO USAR SECRETS
 
 VALID_LEAGUE_IDS = [
     71, 72, 73, 74, 75,
