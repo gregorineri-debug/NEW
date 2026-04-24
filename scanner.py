@@ -38,37 +38,28 @@ LEAGUE_NAMES = {
     406: "Peru", 202: "Polônia", 238: "Portugal",
     239: "Portugal 2", 152: "Romênia", 40: "Suécia",
     215: "Suíça", 52: "Turquia", 278: "Uruguai",
-    357: "FIFA Club World Cup",
-    7: "Champions League",
-    679: "Europa League",
-    17015: "Conference League",
-    16: "FIFA World Cup",
-    384: "Libertadores",
-    480: "Sudamericana",
-    133: "Copa América",
+    357: "FIFA Club World Cup", 7: "Champions League",
+    679: "Europa League", 17015: "Conference League",
+    16: "FIFA World Cup", 384: "Libertadores",
+    480: "Sudamericana", 133: "Copa América",
     1: "Eurocopa"
 }
 
 # -------------------------
-# SOFASCORE
+# REQUESTS
 # -------------------------
 def get_headers():
     return {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/123.0.0.0 Safari/537.36"
-        ),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer": "https://www.sofascore.com/football",
-        "Origin": "https://www.sofascore.com",
-        "Connection": "keep-alive"
+        "Origin": "https://www.sofascore.com"
     }
 
 
-@st.cache_data(ttl=300)
-def get_events(date_str):
+def get_events_requests(date_str):
     urls = [
         f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}",
         f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}"
@@ -91,14 +82,83 @@ def get_events(date_str):
 
             if r.status_code == 200:
                 data = r.json()
-                return data.get("events", []), f"OK: {url}"
+                return data.get("events", []), "OK via requests"
 
-            last_error = f"HTTP {r.status_code} em {url} | {r.text[:300]}"
+            last_error = f"HTTP {r.status_code}"
 
         except Exception as err:
             last_error = str(err)
 
-    return [], last_error
+    return [], f"Requests falhou: {last_error}"
+
+
+# -------------------------
+# PLAYWRIGHT
+# -------------------------
+def get_events_playwright(date_str):
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as err:
+        return [], f"Playwright não instalado: {err}"
+
+    url = f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}"
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled"
+                ]
+            )
+
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/123.0.0.0 Safari/537.36"
+                ),
+                locale="pt-BR",
+                timezone_id="America/Sao_Paulo"
+            )
+
+            page = context.new_page()
+
+            page.goto("https://www.sofascore.com/football", wait_until="domcontentloaded", timeout=60000)
+            time.sleep(2)
+
+            page.goto(url, wait_until="networkidle", timeout=60000)
+
+            content = page.inner_text("body")
+
+            browser.close()
+
+            data = json.loads(content)
+
+            return data.get("events", []), "OK via Playwright"
+
+    except Exception as err:
+        return [], f"Playwright falhou: {err}"
+
+
+# -------------------------
+# BUSCA PRINCIPAL
+# -------------------------
+@st.cache_data(ttl=300)
+def get_events(date_str):
+    events, status = get_events_requests(date_str)
+
+    if events:
+        return events, status
+
+    events, status2 = get_events_playwright(date_str)
+
+    if events:
+        return events, status2
+
+    return [], f"{status} | {status2}"
 
 
 # -------------------------
@@ -162,11 +222,10 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚽ Scanner PRO — SofaScore")
-st.caption("Versão com diagnóstico e fallback manual caso o SofaScore bloqueie o servidor.")
+st.title("⚽ Scanner PRO — SofaScore Automático")
+st.caption("Tentativa automática via requests + Playwright + fallback manual.")
 
 date = st.date_input("Escolha a data")
-
 date_str = date.strftime("%Y-%m-%d")
 
 events, status = get_events(date_str)
@@ -175,16 +234,11 @@ st.write(f"Status da busca: {status}")
 st.write(f"Total bruto retornado: {len(events)}")
 
 if len(events) == 0:
-    st.warning(
-        "Se apareceu HTTP 403, o SofaScore bloqueou a consulta do servidor. "
-        "Nesse caso, rode localmente ou use o fallback manual abaixo."
-    )
+    st.warning("Automático falhou. Use o fallback manual abaixo.")
 
     with st.expander("Fallback manual por JSON"):
-        st.write("Abra no navegador este link, copie o JSON e cole abaixo:")
-        st.code(
-            f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}"
-        )
+        st.write("Abra o link, copie o JSON e cole abaixo:")
+        st.code(f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}")
 
         pasted_json = st.text_area("Cole aqui o JSON do SofaScore")
 
