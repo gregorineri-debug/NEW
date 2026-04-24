@@ -9,7 +9,20 @@ import pandas as pd
 # -------------------------
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
-API_KEY = "COLE_SUA_CHAVE_AQUI"
+API_KEY = import http.client
+
+conn = http.client.HTTPSConnection("v3.football.api-sports.io")
+
+headers = {
+    'x-apisports-key': "XxXxXxXxXxXxXxXxXxXxXxXx"
+    }
+
+conn.request("GET", "/leagues", headers=headers)
+
+res = conn.getresponse()
+data = res.read()
+
+print(data.decode("utf-8"))
 
 VALID_LEAGUE_IDS = [
     71, 72, 73, 74, 75,
