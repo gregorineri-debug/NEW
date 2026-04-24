@@ -3,149 +3,205 @@ import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
+import json
+import time
 
 # -------------------------
 # CONFIG
 # -------------------------
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
-# 🔐 API KEY (pode vir do secrets ou direto aqui)
-try:
-    API_KEY = st.secrets["API_FOOTBALL_KEY"]
-except:
-    API_KEY = "import http.client
-
-conn = http.client.HTTPSConnection("v3.football.api-sports.io")
-
-headers = {
-    'x-apisports-key': "XxXxXxXxXxXxXxXxXxXxXxXx"
-    }
-
-conn.request("GET", "/leagues", headers=headers)
-
-res = conn.getresponse()
-data = res.read()
-
-print(data.decode("utf-8"))"  # 👈 COLE SUA CHAVE AQUI SE NÃO USAR SECRETS
-
 VALID_LEAGUE_IDS = [
-    71, 72, 73, 74, 75,
-    39, 40, 41,
-    140, 141,
-    135, 136,
-    78, 79,
-    61, 62,
-    94,
-    203,
-    218,
-    144,
-    119,
-    103,
-    113,
-    179,
-    307,
-    128,
-    262,
-    2, 3, 848,
-    13,
-    11
+    325,390,17,18,8,54,35,44,23,53,34,182,955,
+    155,703,45,38,247,172,11653,11539,11536,
+    170,39,808,36,242,185,37,131,192,937,
+    11621,11620,20,11540,11541,406,202,
+    238,239,152,40,215,52,278,
+    357,7,679,17015,16,384,480,133,1
 ]
 
-# -------------------------
-# API FOOTBALL
-# -------------------------
-def get_events(date):
-    url = "https://v3.football.api-sports.io/fixtures"
+LEAGUE_NAMES = {
+    325: "Brasileirão", 390: "Série B", 17: "Premier League",
+    18: "Championship", 8: "La Liga", 54: "La Liga 2",
+    35: "Bundesliga", 44: "2. Bundesliga", 23: "Serie A",
+    53: "Serie B Itália", 34: "Ligue 1", 182: "Ligue 2",
+    955: "Saudi Pro League", 155: "Argentina Liga",
+    703: "Primera Nacional", 45: "Áustria", 38: "Bélgica",
+    247: "Bulgária", 172: "Rep. Tcheca", 11653: "Chile",
+    11539: "Colômbia Apertura", 11536: "Colômbia Finalización",
+    170: "Croácia", 39: "Dinamarca", 808: "Egito",
+    36: "Escócia", 242: "MLS", 185: "Grécia",
+    37: "Eredivisie", 131: "Eerste Divisie", 192: "Irlanda",
+    937: "Marrocos", 11621: "Liga MX Apertura",
+    11620: "Liga MX Clausura", 20: "Noruega",
+    11540: "Paraguai Apertura", 11541: "Paraguai Clausura",
+    406: "Peru", 202: "Polônia", 238: "Portugal",
+    239: "Portugal 2", 152: "Romênia", 40: "Suécia",
+    215: "Suíça", 52: "Turquia", 278: "Uruguai",
+    357: "FIFA Club World Cup",
+    7: "Champions League",
+    679: "Europa League",
+    17015: "Conference League",
+    16: "FIFA World Cup",
+    384: "Libertadores",
+    480: "Sudamericana",
+    133: "Copa América",
+    1: "Eurocopa"
+}
 
-    headers = {
-        "x-apisports-key": API_KEY
+# -------------------------
+# SOFASCORE
+# -------------------------
+def get_headers():
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.sofascore.com/football",
+        "Origin": "https://www.sofascore.com",
+        "Connection": "keep-alive"
     }
 
-    params = {
-        "date": date
-    }
+
+@st.cache_data(ttl=300)
+def get_events(date_str):
+    urls = [
+        f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}",
+        f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}"
+    ]
+
+    session = requests.Session()
+    session.headers.update(get_headers())
 
     try:
-        response = requests.get(
-            url,
-            headers=headers,
-            params=params,
-            timeout=20
-        )
+        session.get("https://www.sofascore.com/football", timeout=15)
+        time.sleep(1)
+    except Exception:
+        pass
 
-        if response.status_code != 200:
-            st.error(f"Erro API: HTTP {response.status_code}")
-            st.text(response.text[:500])
-            return []
+    last_error = ""
 
-        data = response.json()
+    for url in urls:
+        try:
+            r = session.get(url, timeout=20)
 
-        if data.get("errors"):
-            st.error(f"Erro da API: {data['errors']}")
-            return []
+            if r.status_code == 200:
+                data = r.json()
+                return data.get("events", []), f"OK: {url}"
 
-        return data.get("response", [])
+            last_error = f"HTTP {r.status_code} em {url} | {r.text[:300]}"
 
-    except Exception as err:
-        st.error(f"Erro conexão API: {err}")
-        return []
+        except Exception as err:
+            last_error = str(err)
+
+    return [], last_error
+
 
 # -------------------------
 # FILTROS
 # -------------------------
-def is_valid_league(event):
+def get_league_id(event):
     try:
-        return event["league"]["id"] in VALID_LEAGUE_IDS
-    except:
+        return event["tournament"]["uniqueTournament"]["id"]
+    except Exception:
+        return None
+
+
+def is_valid_league(event):
+    return get_league_id(event) in VALID_LEAGUE_IDS
+
+
+def is_same_day_br(event, selected_date):
+    try:
+        utc_time = datetime.fromtimestamp(
+            event["startTimestamp"],
+            tz=ZoneInfo("UTC")
+        )
+        br_time = utc_time.astimezone(BR_TZ)
+        return br_time.date() == selected_date
+    except Exception:
         return False
 
 
 def format_game(event):
     try:
-        utc_time = datetime.fromisoformat(
-            event["fixture"]["date"].replace("Z", "+00:00")
+        league_id = get_league_id(event)
+
+        utc_time = datetime.fromtimestamp(
+            event["startTimestamp"],
+            tz=ZoneInfo("UTC")
         )
 
         br_time = utc_time.astimezone(BR_TZ).strftime("%H:%M")
 
+        home = event.get("homeTeam", {}).get("name", "Mandante")
+        away = event.get("awayTeam", {}).get("name", "Visitante")
+
         return {
             "Hora": br_time,
-            "Liga": event["league"]["name"],
-            "Jogo": f"{event['teams']['home']['name']} vs {event['teams']['away']['name']}",
-            "Status": event["fixture"]["status"]["short"]
+            "Liga": LEAGUE_NAMES.get(league_id, f"Liga ID {league_id}"),
+            "Jogo": f"{home} vs {away}",
+            "SofaScore ID": event.get("id", "")
         }
 
     except Exception as err:
         st.warning(f"Erro ao processar jogo: {err}")
         return None
 
+
 # -------------------------
 # UI
 # -------------------------
 st.set_page_config(
-    page_title="Scanner PRO V7",
+    page_title="Scanner PRO SofaScore",
     page_icon="⚽",
     layout="wide"
 )
 
-st.title("⚽ Scanner PRO V7 — API-Football")
+st.title("⚽ Scanner PRO — SofaScore")
+st.caption("Versão com diagnóstico e fallback manual caso o SofaScore bloqueie o servidor.")
 
 date = st.date_input("Escolha a data")
 
-# trava se não colocou chave
-if API_KEY == "SUA_CHAVE_AQUI":
-    st.error("⚠️ Cole sua chave da API-Football no código ou no secrets.toml")
-    st.stop()
+date_str = date.strftime("%Y-%m-%d")
 
-events = get_events(date.strftime("%Y-%m-%d"))
+events, status = get_events(date_str)
 
-st.write(f"Total bruto: {len(events)}")
+st.write(f"Status da busca: {status}")
+st.write(f"Total bruto retornado: {len(events)}")
+
+if len(events) == 0:
+    st.warning(
+        "Se apareceu HTTP 403, o SofaScore bloqueou a consulta do servidor. "
+        "Nesse caso, rode localmente ou use o fallback manual abaixo."
+    )
+
+    with st.expander("Fallback manual por JSON"):
+        st.write("Abra no navegador este link, copie o JSON e cole abaixo:")
+        st.code(
+            f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date_str}"
+        )
+
+        pasted_json = st.text_area("Cole aqui o JSON do SofaScore")
+
+        if pasted_json:
+            try:
+                data = json.loads(pasted_json)
+                events = data.get("events", [])
+                st.success(f"JSON carregado manualmente: {len(events)} jogos")
+            except Exception as err:
+                st.error(f"JSON inválido: {err}")
 
 filtered_events = [
-    e for e in events if is_valid_league(e)
+    e for e in events
+    if is_valid_league(e) and is_same_day_br(e, date)
 ]
 
-st.write(f"Jogos válidos: {len(filtered_events)}")
+st.write(f"Jogos válidos nas ligas cadastradas: {len(filtered_events)}")
 
 if st.button("Analisar Jogos"):
 
@@ -159,9 +215,18 @@ if st.button("Analisar Jogos"):
     if results:
         df = pd.DataFrame(results).sort_values(by="Hora")
 
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
-        st.success(f"Total de jogos: {len(df)}")
+        st.success(f"Total de jogos encontrados: {len(df)}")
+
+        csv = df.to_csv(index=False).encode("utf-8-sig")
+
+        st.download_button(
+            label="📥 Baixar CSV",
+            data=csv,
+            file_name=f"scanner_sofascore_{date_str}.csv",
+            mime="text/csv"
+        )
 
     else:
         st.warning("Nenhum jogo encontrado.")
