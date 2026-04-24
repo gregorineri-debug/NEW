@@ -9,153 +9,79 @@ import pandas as pd
 # -------------------------
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
+API_KEY = st.secrets["API_FOOTBALL_KEY"]  # coloque no secrets.toml
+
 VALID_LEAGUE_IDS = [
-    325,390,17,18,8,54,35,44,23,53,34,182,955,
-    155,703,45,38,247,172,11653,11539,11536,
-    170,39,808,36,242,185,37,131,192,937,
-    11621,11620,20,11540,11541,406,202,
-    238,239,152,40,215,52,278,
-    357,7,679,17015,16,384,480,133,1
+    71, 72, 73, 74, 75,  # Brasil
+    39, 40, 41,          # Inglaterra
+    140, 141,            # Espanha
+    135, 136,            # Itália
+    78, 79,              # Alemanha
+    61, 62,              # França
+    94,                  # Portugal
+    203,                 # Turquia
+    218,                 # Áustria
+    144,                 # Bélgica
+    119,                 # Dinamarca
+    103,                 # Noruega
+    113,                 # Suécia
+    179,                 # Escócia
+    307,                 # Arábia Saudita
+    128,                 # Argentina
+    262,                 # Liga MX
+    2, 3, 848,           # Champions / Europa / Conference
+    13,                  # Libertadores
+    11                   # Sudamericana
 ]
 
-LEAGUE_NAMES = {
-    325: "Brasileirão",
-    390: "Série B",
-    17: "Premier League",
-    18: "Championship",
-    8: "La Liga",
-    54: "La Liga 2",
-    35: "Bundesliga",
-    44: "2. Bundesliga",
-    23: "Serie A",
-    53: "Serie B Itália",
-    34: "Ligue 1",
-    182: "Ligue 2",
-    955: "Saudi Pro League",
-    155: "Argentina Liga",
-    703: "Primera Nacional",
-    45: "Áustria",
-    38: "Bélgica",
-    247: "Bulgária",
-    172: "Rep. Tcheca",
-    11653: "Chile",
-    11539: "Colômbia Apertura",
-    11536: "Colômbia Finalización",
-    170: "Croácia",
-    39: "Dinamarca",
-    808: "Egito",
-    36: "Escócia",
-    242: "MLS",
-    185: "Grécia",
-    37: "Eredivisie",
-    131: "Eerste Divisie",
-    192: "Irlanda",
-    937: "Marrocos",
-    11621: "Liga MX Apertura",
-    11620: "Liga MX Clausura",
-    20: "Noruega",
-    11540: "Paraguai Apertura",
-    11541: "Paraguai Clausura",
-    406: "Peru",
-    202: "Polônia",
-    238: "Portugal",
-    239: "Portugal 2",
-    152: "Romênia",
-    40: "Suécia",
-    215: "Suíça",
-    52: "Turquia",
-    278: "Uruguai",
-    357: "FIFA Club World Cup",
-    7: "Champions League",
-    679: "Europa League",
-    17015: "Conference League",
-    16: "FIFA World Cup",
-    384: "Libertadores",
-    480: "Sudamericana",
-    133: "Copa América",
-    1: "Eurocopa"
-}
-
 # -------------------------
-# API SOFASCORE
+# API FOOTBALL
 # -------------------------
 def get_events(date):
-    urls = [
-        f"https://www.sofascore.com/api/v1/sport/football/scheduled-events/{date}",
-        f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{date}"
-    ]
+    url = "https://v3.football.api-sports.io/fixtures"
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.sofascore.com/",
-        "Origin": "https://www.sofascore.com"
+        "x-apisports-key": API_KEY
     }
 
-    for url in urls:
-        try:
-            response = requests.get(url, headers=headers, timeout=20)
+    params = {
+        "date": date
+    }
 
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("events", [])
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=20)
 
-            else:
-                st.warning(f"Tentativa falhou: HTTP {response.status_code}")
+        if response.status_code != 200:
+            st.error(f"Erro API: {response.status_code}")
+            return []
 
-        except Exception as err:
-            st.warning(f"Erro ao consultar SofaScore: {err}")
+        data = response.json()
+        return data.get("response", [])
 
-    st.error("Não foi possível buscar jogos no SofaScore.")
-    return []
+    except Exception as err:
+        st.error(f"Erro conexão API: {err}")
+        return []
 
 # -------------------------
 # FILTROS
 # -------------------------
-def get_league_id(event):
-    try:
-        return event["tournament"]["uniqueTournament"]["id"]
-    except Exception:
-        return None
-
-
 def is_valid_league(event):
-    league_id = get_league_id(event)
-    return league_id in VALID_LEAGUE_IDS
-
-
-def is_same_day_br(event, selected_date):
     try:
-        utc_time = datetime.fromtimestamp(
-            event["startTimestamp"],
-            tz=ZoneInfo("UTC")
-        )
-        br_time = utc_time.astimezone(BR_TZ)
-        return br_time.date() == selected_date
-
-    except Exception:
+        return event["league"]["id"] in VALID_LEAGUE_IDS
+    except:
         return False
 
 
 def format_game(event):
     try:
-        league_id = get_league_id(event)
-
-        utc_time = datetime.fromtimestamp(
-            event["startTimestamp"],
-            tz=ZoneInfo("UTC")
-        )
+        utc_time = datetime.fromisoformat(event["fixture"]["date"].replace("Z", "+00:00"))
         br_time = utc_time.astimezone(BR_TZ).strftime("%H:%M")
-
-        home = event.get("homeTeam", {}).get("name", "Mandante")
-        away = event.get("awayTeam", {}).get("name", "Visitante")
 
         return {
             "Hora": br_time,
-            "Liga": LEAGUE_NAMES.get(league_id, f"Liga ID {league_id}"),
-            "Jogo": f"{home} vs {away}",
-            "SofaScore ID": event.get("id", "")
+            "Liga": event["league"]["name"],
+            "Jogo": f"{event['teams']['home']['name']} vs {event['teams']['away']['name']}",
+            "Status": event["fixture"]["status"]["short"]
         }
 
     except Exception as err:
@@ -166,26 +92,22 @@ def format_game(event):
 # UI
 # -------------------------
 st.set_page_config(
-    page_title="Scanner PRO V6.1",
+    page_title="Scanner PRO V7 (API-Football)",
     page_icon="⚽",
     layout="wide"
 )
 
-st.title("⚽ Scanner PRO V6.1")
-st.caption("Busca jogos do SofaScore filtrando pelas ligas cadastradas.")
+st.title("⚽ Scanner PRO V7 (API-Football)")
 
 date = st.date_input("Escolha a data")
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
-st.write(f"Total bruto retornado pelo SofaScore: {len(events)}")
+st.write(f"Total retornado pela API: {len(events)}")
 
-filtered_events = [
-    e for e in events
-    if is_valid_league(e) and is_same_day_br(e, date)
-]
+filtered_events = [e for e in events if is_valid_league(e)]
 
-st.write(f"Jogos válidos nas ligas cadastradas: {len(filtered_events)}")
+st.write(f"Jogos válidos: {len(filtered_events)}")
 
 if st.button("Analisar Jogos"):
 
@@ -197,21 +119,20 @@ if st.button("Analisar Jogos"):
             results.append(item)
 
     if results:
-        df = pd.DataFrame(results)
-        df = df.sort_values(by="Hora")
+        df = pd.DataFrame(results).sort_values(by="Hora")
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True)
 
-        st.success(f"Total de jogos encontrados: {len(df)}")
+        st.success(f"Total de jogos: {len(df)}")
 
         csv = df.to_csv(index=False).encode("utf-8-sig")
 
         st.download_button(
             label="📥 Baixar CSV",
             data=csv,
-            file_name=f"scanner_pro_{date.strftime('%Y-%m-%d')}.csv",
+            file_name=f"scanner_{date}.csv",
             mime="text/csv"
         )
 
     else:
-        st.warning("Nenhum jogo encontrado nas ligas cadastradas.")
+        st.warning("Nenhum jogo encontrado.")
