@@ -9,20 +9,11 @@ import pandas as pd
 # -------------------------
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
-API_KEY = import http.client
-
-conn = http.client.HTTPSConnection("v3.football.api-sports.io")
-
-headers = {
-    'x-apisports-key': "XxXxXxXxXxXxXxXxXxXxXxXx"
-    }
-
-conn.request("GET", "/leagues", headers=headers)
-
-res = conn.getresponse()
-data = res.read()
-
-print(data.decode("utf-8"))
+# 🔐 API KEY (pode vir do secrets ou direto aqui)
+try:
+    API_KEY = st.secrets["API_FOOTBALL_KEY"]
+except:
+    API_KEY = "SUA_CHAVE_AQUI"  # 👈 COLE SUA CHAVE AQUI SE NÃO USAR SECRETS
 
 VALID_LEAGUE_IDS = [
     71, 72, 73, 74, 75,
@@ -76,14 +67,14 @@ def get_events(date):
 
         data = response.json()
 
-        if "errors" in data and data["errors"]:
-            st.error(f"Erro retornado pela API: {data['errors']}")
+        if data.get("errors"):
+            st.error(f"Erro da API: {data['errors']}")
             return []
 
         return data.get("response", [])
 
     except Exception as err:
-        st.error(f"Erro de conexão com API: {err}")
+        st.error(f"Erro conexão API: {err}")
         return []
 
 # -------------------------
@@ -92,7 +83,7 @@ def get_events(date):
 def is_valid_league(event):
     try:
         return event["league"]["id"] in VALID_LEAGUE_IDS
-    except Exception:
+    except:
         return False
 
 
@@ -104,22 +95,11 @@ def format_game(event):
 
         br_time = utc_time.astimezone(BR_TZ).strftime("%H:%M")
 
-        league_id = event["league"]["id"]
-        league_name = event["league"]["name"]
-        country = event["league"]["country"]
-
-        home = event["teams"]["home"]["name"]
-        away = event["teams"]["away"]["name"]
-
-        status = event["fixture"]["status"]["short"]
-
         return {
             "Hora": br_time,
-            "País": country,
-            "Liga": league_name,
-            "Liga ID": league_id,
-            "Jogo": f"{home} vs {away}",
-            "Status": status
+            "Liga": event["league"]["name"],
+            "Jogo": f"{event['teams']['home']['name']} vs {event['teams']['away']['name']}",
+            "Status": event["fixture"]["status"]["short"]
         }
 
     except Exception as err:
@@ -136,24 +116,23 @@ st.set_page_config(
 )
 
 st.title("⚽ Scanner PRO V7 — API-Football")
-st.caption("Scanner com API-Football / API-Sports")
 
 date = st.date_input("Escolha a data")
 
-if API_KEY == "COLE_SUA_CHAVE_AQUI":
-    st.error("⚠️ Troque COLE_SUA_CHAVE_AQUI pela sua chave da API-Sports.")
+# trava se não colocou chave
+if API_KEY == "SUA_CHAVE_AQUI":
+    st.error("⚠️ Cole sua chave da API-Football no código ou no secrets.toml")
     st.stop()
 
 events = get_events(date.strftime("%Y-%m-%d"))
 
-st.write(f"Total bruto retornado pela API: {len(events)}")
+st.write(f"Total bruto: {len(events)}")
 
 filtered_events = [
-    e for e in events
-    if is_valid_league(e)
+    e for e in events if is_valid_league(e)
 ]
 
-st.write(f"Jogos válidos nas ligas cadastradas: {len(filtered_events)}")
+st.write(f"Jogos válidos: {len(filtered_events)}")
 
 if st.button("Analisar Jogos"):
 
@@ -165,21 +144,11 @@ if st.button("Analisar Jogos"):
             results.append(item)
 
     if results:
-        df = pd.DataFrame(results)
-        df = df.sort_values(by="Hora")
+        df = pd.DataFrame(results).sort_values(by="Hora")
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, use_container_width=True)
 
-        st.success(f"Total de jogos encontrados: {len(df)}")
-
-        csv = df.to_csv(index=False).encode("utf-8-sig")
-
-        st.download_button(
-            label="📥 Baixar CSV",
-            data=csv,
-            file_name=f"scanner_pro_{date.strftime('%Y-%m-%d')}.csv",
-            mime="text/csv"
-        )
+        st.success(f"Total de jogos: {len(df)}")
 
     else:
-        st.warning("Nenhum jogo encontrado nas ligas cadastradas.")
+        st.warning("Nenhum jogo encontrado.")
